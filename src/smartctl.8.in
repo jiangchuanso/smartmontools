@@ -1707,6 +1707,15 @@ metrics and values from Seagate's vendor-specific Field Access
 Reliability Metrics (FARM) log when used on a drive supporting FARM.
 ATA and SAS logs differ slightly.
 \fBWARNING: Some Seagate drives do not support FARM.\fP
+.Sp
+.I ps3ssd
+\- [ATA] prints the SSD vendor health log used by SSDs in the PS3
+storage controller scenario: the detailed reliability counters
+(GP Log 0xE4) and the per-counter health levels (GP Log 0xE5).
+The logs are read via standard ATA READ LOG EXT commands, so it works
+on SATA and SAT (USB bridge) devices without any vendor library.
+\fBWARNING: The log layout is vendor-specific, unsupported SSDs may
+report meaningless values.\fP
 .TP
 .B \-v ID,FORMAT[:BYTEORDER][,NAME], \-\-vendorattribute=ID,FORMAT...
 [ATA only] Sets a vendor-specific raw value print FORMAT, an optional
