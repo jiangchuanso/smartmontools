@@ -1,0 +1,111 @@
+name: Build CentOS 8 RPMs (smartmontools)
+
+# Publishes CentOS 8 (el8) RPMs for both x86_64 and aarch64 on every GitHub
+# release. The binary is built *inside* a CentOS 8 container, so it links
+# against the CentOS 8 glibc and is guaranteed runtime-compatible.
+#
+# Trigger:
+#   - A published GitHub Release (assets are attached automatically)
+#   - Manual run via workflow_dispatch (artifacts are uploaded only)
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+
+permissions:
+  contents: write   # needed to attach assets to the release
+
+jobs:
+  build-rpm:
+    name: Build RPM for ${{ matrix.arch }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: x86_64
+            platform: linux/amd64
+          - arch: aarch64
+            platform: linux/arm64
+
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v4
+        with:
+          # smartmontools computes its version string from the git log
+          # (util/getversion.sh), so a reasonably deep clone is required.
+          fetch-depth: 3500
+          fetch-tags: true
+
+      - name: Set up QEMU (aarch64 only)
+        if: matrix.arch == 'aarch64'
+        uses: docker/setup-qemu-action@v3
+        with:
+          platforms: arm64
+
+      - name: Clean previous RPMs
+        run: rm -f *.rpm
+
+      - name: Build RPM in CentOS 8 container
+        env:
+          PLATFORM: ${{ matrix.platform }}
+        run: |
+          set -eux
+          docker run --rm --platform "$PLATFORM" \
+            -v "$PWD":/src -w /src centos:8 \
+            bash -c '
+              set -e
+              # CentOS 8 is end-of-life: the default mirrorlist is dead, so
+              # repoint the repos to vault.centos.org before installing anything.
+              sed -i "s/mirrorlist/#mirrorlist/g; s|#baseurl=http://mirror.centos.org|baseurl=http://vault.centos.org|g" /etc/yum.repos.d/CentOS-Linux-*.repo || true
+
+              dnf -y install gcc-c++ make rpm-build gzip tar git \
+                  autoconf automake libtool systemd-devel
+
+              mkdir -p /root/rpmbuild/{BUILD,RPMS,SRPMS,SOURCES,SPECS}
+
+              # Create the release tarball from a scratch copy of the checkout so
+              # the workspace mounted at /src stays clean. "make dist" also adds
+              # util/dist-version.sh, which the later build needs (getversion.sh).
+              rm -rf /tmp/smt && mkdir -p /tmp/smt
+              cp -a /src/. /tmp/smt/
+              cd /tmp/smt
+              git clean -dxfq || true
+              chmod +x autogen.sh configure config.sub config.guess install-sh \
+                      missing depcomp compile 2>/dev/null || true
+              ./autogen.sh --force
+              ./configure
+              make dist
+              ls -l smartmontools-*.tar.gz
+              cp -v smartmontools-8.0.tar.gz /root/rpmbuild/SOURCES/
+
+              # Build the RPM. "dist .el8" pins the release tag. Keep Version in
+              # /src/smartmontools.spec in sync with configure.ac (currently 8.0).
+              rpmbuild -bb \
+                --define "_topdir /root/rpmbuild" \
+                --define "dist .el8" \
+                /src/smartmontools.spec
+
+              # Copy the RPM(s) back to the workspace
+              cp -v /root/rpmbuild/RPMS/*/*.rpm /src/
+
+              # Smoke test: install the freshly built package and run the binaries
+              rpm -Uvh /root/rpmbuild/RPMS/*/smartmontools-*.el8.*.rpm
+              /usr/sbin/smartctl --version
+              /usr/sbin/smartd --version
+              /usr/sbin/smartctl --scan || true
+            '
+
+      - name: Upload RPM artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: smartmontools-el8-${{ matrix.arch }}
+          path: "*.rpm"
+          if-no-files-found: error
+
+      - name: Attach RPM to GitHub release
+        if: github.event_name == 'release'
+        uses: softprops/action-gh-release@v2
+        with:
+          files: "*.rpm"
