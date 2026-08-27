@@ -7,8 +7,11 @@
 # for x86_64 and aarch64.  The workflow creates the source tarball with
 # 'make dist' and copies it to the rpmbuild SOURCES directory.
 #
-# NOTE: Keep 'Version:' in sync with 'AC_INIT([smartmontools],[X.Y],...)'
-#       in configure.ac (currently 8.0).
+# NOTE: The build workflow (.github/workflows/build-centos8-rpm.yml) passes
+#       '--define "version ..."' to rpmbuild, so the effective version always
+#       matches 'AC_INIT([smartmontools],[X.Y],...)' in configure.ac even if
+#       the 'Version:' field below is not updated. Still keep 'Version:' in
+#       sync with configure.ac (currently 8.0) for manual builds.
 #
 
 %global debug_package %{nil}
