@@ -151,7 +151,7 @@ static char* farm_format_id_string(char* buffer, const uint64_t param1, const ui
  */
 void ataPrintFarmLog(const ataFarmLog& farmLog) {
   // Request feedback on FARM output on big-endian systems
-  if (isbigendian()) {
+  if (byteorder_is_big_endian) {
     jinf("FARM support was not tested on Big Endian platforms by the developers.\n"
          "Please report success/failure to " PACKAGE_BUGREPORT "\n\n");
   }
@@ -212,8 +212,8 @@ void ataPrintFarmLog(const ataFarmLog& farmLog) {
   jout("\t\tDevice Form Factor: %s\n", formFactor);
   jout("\t\tRotation Rate: %" PRIu64 " rpm\n", farmLog.driveInformation.rotationRate);
   jout("\t\tFirmware Rev: %s\n", firmwareRev);
-  jout("\t\tATA Security State (ID Word 128): 0x016%" PRIx64 "\n", farmLog.driveInformation.security);
-  jout("\t\tATA Features Supported (ID Word 78): 0x016%" PRIx64 "\n", farmLog.driveInformation.featuresSupported);
+  jout("\t\tATA Security State (ID Word 128): 0x%016" PRIx64 "\n", farmLog.driveInformation.security);
+  jout("\t\tATA Features Supported (ID Word 78): 0x%016" PRIx64 "\n", farmLog.driveInformation.featuresSupported);
   jout("\t\tATA Features Enabled (ID Word 79): 0x%016" PRIx64 "\n", farmLog.driveInformation.featuresEnabled);
   jout("\t\tPower on Hours: %" PRIu64 "\n", farmLog.driveInformation.poh);
   jout("\t\tSpindle Power on Hours: %" PRIu64 "\n", farmLog.driveInformation.spoh);
@@ -514,7 +514,7 @@ void ataPrintFarmLog(const ataFarmLog& farmLog) {
  */
 void scsiPrintFarmLog(const scsiFarmLog& farmLog) {
   // Request feedback on FARM output on big-endian systems
-  if (isbigendian()) {
+  if (byteorder_is_big_endian) {
     jinf("FARM support was not tested on Big Endian platforms by the developers.\n"
          "Please report success/failure to " PACKAGE_BUGREPORT "\n\n");
   }

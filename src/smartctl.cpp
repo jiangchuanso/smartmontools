@@ -4,7 +4,7 @@
  * Home page of code is: https://www.smartmontools.org
  *
  * Copyright (C) 2002-11 Bruce Allen
- * Copyright (C) 2008-25 Christian Franke
+ * Copyright (C) 2008-26 Christian Franke
  * Copyright (C) 2000 Michael Cornwell <cornwell@acm.org>
  *
  * SPDX-License-Identifier: GPL-2.0-or-later
@@ -51,7 +51,7 @@ bool printing_is_off = false;
 // Control JSON output
 json jglb;
 static bool print_as_json = false;
-static json::print_options print_as_json_options;
+static json::output_options print_as_json_options;
 static bool print_as_json_output = false;
 static bool print_as_json_impl = false;
 static bool print_as_json_unimpl = false;
@@ -1330,6 +1330,8 @@ static int parse_options(int argc, char** argv, const char * & type,
 
 // Printing functions
 
+SMARTMON_DIAGNOSTIC_FORMAT_NONLITERAL_IGNORE
+
 SMARTMON_FORMAT_PRINTF(3, 0)
 static void vjpout(bool is_js_impl, const char * msg_severity,
                    const char *fmt, va_list ap)
@@ -1380,6 +1382,8 @@ static void vjpout(bool is_js_impl, const char * msg_severity,
     }
   }
 }
+
+SMARTMON_DIAGNOSTIC_FORMAT_NONLITERAL_RESTORE
 
 static bool pout_enabled()
 {
@@ -1470,6 +1474,8 @@ public:
 
 static smartctl_hook the_smartctl_hook;
 
+SMARTMON_DIAGNOSTIC_FORMAT_NONLITERAL_IGNORE
+
 void smartctl_hook::lib_vprintf(const char * fmt, va_list ap)
 {
   // Same as pout()
@@ -1477,6 +1483,8 @@ void smartctl_hook::lib_vprintf(const char * fmt, va_list ap)
     return;
   vjpout(false, 0, fmt, ap);
 }
+
+SMARTMON_DIAGNOSTIC_FORMAT_NONLITERAL_RESTORE
 
 void smartctl_hook::on_checksum_error(const char * datatype)
 {
@@ -1734,7 +1742,7 @@ int main(int argc, char **argv)
     if (jglb.has_uint128_output())
       jglb["smartctl"]["uint128_precision_bits"] = uint128_to_str_precision_bits();
     jglb["smartctl"]["exit_status"] = status;
-    jglb.print(stdout, print_as_json_options);
+    jglb.output([](const char * str){ fputs(str, stdout); }, nullptr, print_as_json_options);
   }
   catch (const std::bad_alloc & /*ex*/) {
     // Memory allocation failed (also thrown by std::operator new)

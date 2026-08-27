@@ -3,7 +3,7 @@
  *
  * Home page of code is: https://www.smartmontools.org
  *
- * Copyright (C) 2025 Christian Franke
+ * Copyright (C) 2025-26 Christian Franke
  *
  * SPDX-License-Identifier: GPL-2.0-or-later
  */
@@ -13,7 +13,6 @@
 #include <smartmon/nvmecmds.h>
 #include <smartmon/scsicmds.h>
 #include <smartmon/utility.h>
-#include <smartmon/sg_unaligned.h>
 
 #include <cstdio>
 #include <cstdlib>
@@ -43,7 +42,7 @@ static int dev_error(const smartmon::smart_device * dev, const char * msg)
 static int identify(smartmon::ata_device * dev)
 {
   smartmon::ata_identify_device id{};
-  int atapi = smartmon::ata_read_identity(dev, &id, false, nullptr);
+  int atapi = smartmon::ata_read_identity(dev, id);
   if (atapi < 0)
     return dev_error(dev, "ata_read_identity() failed");
 
@@ -54,12 +53,13 @@ static int identify(smartmon::ata_device * dev)
     smartmon::format_capacity(cap, sizeof(cap), sizes.capacity);
 
   char md[40 + 1], fw[8 + 1], sn[20 + 1];
-  smartmon::ata_format_id_string(md, id.model, sizeof(md) - 1);
-  smartmon::ata_format_id_string(fw, id.fw_rev, sizeof(fw) - 1);
-  smartmon::ata_format_id_string(sn, id.serial_no, sizeof(sn) - 1);
   std::printf("%s -d %s [ATA%s]: \"%s\", FW:\"%s\", S/N:\"%s\"%s%s\n",
     dev->get_info_name(), dev->get_dev_type(),
-    (!atapi ? "" : "PI"), md, fw, sn, (cap[0] ? ", " : ""), cap);
+    (!atapi ? "" : "PI"),
+    smartmon::format_char_array(md, id.model),
+    smartmon::format_char_array(fw, id.fw_rev),
+    smartmon::format_char_array(sn, id.serial_no),
+    (cap[0] ? ", " : ""), cap);
   return 0;
 }
 
@@ -96,7 +96,7 @@ static int identify(smartmon::nvme_device * dev)
     std::snprintf(ns, sizeof(ns), ", NS:%u", (unsigned)nsid);
 
   char cap[32]{};
-  uint64_t tnvmcap = sg_get_unaligned_le64(id_ctrl.tnvmcap);
+  uint64_t tnvmcap = smartmon::uile128_clamp_to_uint64(id_ctrl.tnvmcap);
   if (tnvmcap)
     smartmon::format_capacity(cap, sizeof(cap), tnvmcap);
 

@@ -53,11 +53,11 @@ public:
 
   virtual ~netbsd_smart_device();
 
-  virtual bool is_open() const;
+  virtual bool is_open() const override;
 
-  virtual bool open();
+  virtual bool open() override;
 
-  virtual bool close();
+  virtual bool close() override;
 
 protected:
   /// Return filedesc for derived classes.
@@ -208,10 +208,8 @@ bool netbsd_ata_device::ata_pass_through(const ata_cmd_in & in, ata_cmd_out & ou
   out.out_regs.lba_high = req.cylinder >> 8;
   out.out_regs.status = req.command;
   /* Undo byte-swapping for IDENTIFY */
-  if (in.in_regs.command == ATA_IDENTIFY_DEVICE && isbigendian()) {
-     for (int i = 0; i < 256; i+=2)
-      swap2 ((char *)req.databuf + i);
-  }
+  if (in.in_regs.command == ATA_IDENTIFY_DEVICE && byteorder_is_big_endian)
+    byteswap_array_16_inplace((uint8_t *)in.buffer, in.size);
   return true;
 }
 
@@ -688,12 +686,7 @@ bool netbsd_smart_interface::scan_smart_devices(smart_device_list & devlist,
 
   bool scan_ata = !*type || !strcmp(type, "ata");
   bool scan_scsi = !*type || !strcmp(type, "scsi") || !strcmp(type, "sat");
-
-#ifdef WITH_NVME_DEVICESCAN // TODO: Remove when NVMe support is no longer EXPERIMENTAL
   bool scan_nvme = !*type || !strcmp(type, "nvme");
-#else
-  bool scan_nvme =          !strcmp(type, "nvme");
-#endif
 
   // Make namelists
   char * * atanames = 0; int numata = 0;

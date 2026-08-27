@@ -32,7 +32,7 @@ EXEEXT = @EXEEXT@
 
 LDLIBS = -lsmartmon $(LIBS)
 
-PROGRAMS = lsdisk$(EXEEXT)
+PROGRAMS = ata-standby$(EXEEXT) hexdump$(EXEEXT) lsdisk$(EXEEXT)
 
 all: $(PROGRAMS)
 
@@ -46,6 +46,23 @@ v_CXX_1 =
 
 .cpp$(EXEEXT):
 	$(v_CXX)$(CXX) $(CPPFLAGS) $(CXXFLAGS) $(LDFLAGS) -o $@ $< $(LDLIBS)
+
+SBINDIR = /usr/local/sbin
+INSTALL = cp
+
+install: all
+	mkdir -p $(DESTDIR)$(SBINDIR)
+	@for f in $(PROGRAMS); do \
+	  echo "$(INSTALL) $$f $(DESTDIR)$(SBINDIR)"; \
+	  $(INSTALL) $$f $(DESTDIR)$(SBINDIR); \
+	done
+
+uninstall:
+	@for f in $(PROGRAMS); do \
+	  test -f $(DESTDIR)$(SBINDIR)/$$f || continue; \
+	  echo "rm -f $(DESTDIR)$(SBINDIR)/$$f"; \
+	  rm -f $(DESTDIR)$(SBINDIR)/$$f; \
+	done
 
 clean:
 	rm -f $(PROGRAMS)

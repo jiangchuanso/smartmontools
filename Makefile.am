@@ -5,22 +5,25 @@
 
 ACLOCAL_AMFLAGS = -I m4
 
-docsdir=$(docdir)
-docs_DATA = \
+# Suppress 'echo' if './configure --enable-silent-rules' or 'make V=0' is used.
+# Variables AM_V_* are provided by automake >= 1.13.
+ECHO_V = ! $(AM_V_P) || echo
+ECHO_V_GEN = @$(AM_V_P) || echo '  GEN      $@'; $(ECHO_V)
+
+doc_DATA = \
         doc/AUTHORS \
         doc/CHANGELOG.md \
         COPYING \
-        doc/INSTALL \
+        doc/INSTALL.md \
         README.md
 
 docolddir = $(docdir)/old
 docold_DATA = \
         doc/old/NEWS-5.0-7.5.txt
 
-examplesdir=$(exampledir)
-examples_DATA = \
+examplescripts_DATA = \
         doc/examplescripts/README
-examples_SCRIPTS = \
+examplescripts_SCRIPTS = \
         doc/examplescripts/Example1 \
         doc/examplescripts/Example2 \
         doc/examplescripts/Example3 \
@@ -36,13 +39,19 @@ EXTRA_DIST = \
         doc/old/ChangeLog-6.0-7.0.txt \
         doc/old/ChangeLog-5.0-6.0.txt \
         doc/old/ChangeLog-7.0-7.5.txt \
-        m4/pkg.m4 \
-        $(docs_DATA) \
+        drivedb/drivedb.h \
+        util/clang-scan-build.sh \
+        util/cppcheck.sh \
+        util/getversion.sh \
+        util/pe32edit.sh \
+        $(doc_DATA) \
         $(docold_DATA) \
-        $(examples_DATA) \
-        $(examples_SCRIPTS)
+        $(examplescripts_DATA) \
+        $(examplescripts_SCRIPTS)
 
 CLEANFILES = \
+        cppcheck.txt \
+        shellcheck.txt \
         smartmontools-$(PACKAGE_VERSION).tar \
         smartmontools-$(PACKAGE_VERSION)-bin.tar
 
@@ -64,19 +73,20 @@ MAINTAINERCLEANFILES = \
         $(srcdir)/m4/libtool.m4~ \
         $(srcdir)/m4/lt*.m4 \
         $(srcdir)/m4/lt*.m4~ \
-        $(srcdir)/m4/pkg.m4 \
         $(srcdir)/missing
 
 SUBDIRS = include lib src
 
+# Avoid automake warning: '.PHONY was already defined in condition ...'
+phony = bin-dist cppcheck shellcheck
+.PHONY: $(phony)
+
 #
 # Additional targets in '*/Makefile.am'
 #
-SRC_TARGETS = cppcheck htmlman pdfman shellcheck
+SRC_TARGETS = clean-examples htmlman pdfman uninstall-examples
 INC_SRC_TARGETS =
-LIB_SRC_TARGETS =
-LIB_TARGETS = clean-examples
-INC_LIB_TARGETS = examples
+LIB_SRC_TARGETS = examples install-examples
 
 if OS_WIN32_MINGW
 SRC_TARGETS += cleandist-win32 clean-vc distclean-vc maintainer-clean-vc
@@ -88,9 +98,7 @@ if OS_DARWIN
 LIB_SRC_TARGETS += install-darwin install-darwin-cleanup
 endif
 
-# Avoid automake warning: '.PHONY was already defined in condition ...'
-phony = bin-dist $(SRC_TARGETS) $(INC_SRC_TARGETS) $(LIB_SRC_TARGETS)
-.PHONY: $(phony)
+phony += $(SRC_TARGETS) $(INC_SRC_TARGETS) $(LIB_SRC_TARGETS)
 
 $(SRC_TARGETS) $(INC_SRC_TARGETS) $(LIB_SRC_TARGETS):
 	@case ' $(INC_SRC_TARGETS) $(LIB_SRC_TARGETS) ' in *\ $@\ *) \
@@ -101,16 +109,10 @@ $(SRC_TARGETS) $(INC_SRC_TARGETS) $(LIB_SRC_TARGETS):
 	esac
 	$(MAKE) -C src $@
 
-$(LIB_TARGETS) $(INC_LIB_TARGETS):
-	@case ' $(INC_LIB_TARGETS) ' in *\ $@\ *) \
-	  echo $(MAKE) -C include; $(MAKE) -C include ;; \
-	esac
-	$(MAKE) -C lib $@
-
 # Add version information to distribution directory
 dist-hook:
 	$(MAKE) -C include smartmon/version.sh
-	cp include/smartmon/version.sh $(distdir)/src/dist-version.sh
+	cp include/smartmon/version.sh $(distdir)/util/dist-version.sh
 
 if REPRODUCIBLE_BUILD
 # Override the builtin 'dist-*' rules to create reproducible tarballs
@@ -119,19 +121,25 @@ phony += dist-fail
 
 dist-gzip: distdir
 	$(dist_tar) $(distdir) > $(distdir).tar
-	-touch -d @$(SOURCE_DATE_EPOCH) $(distdir).tar
+	@if test -n '$(source_date_iso)'; then \
+	  echo "touch -d '$(source_date_iso)' $(distdir).tar"; \
+	  touch -d '$(source_date_iso)' $(distdir).tar; fi
 	unset GZIP; gzip $(GZIP_ENV) -f -n $(distdir).tar
 	$(am__post_remove_distdir)
 
 dist-xz: distdir
 	$(dist_tar) $(distdir) > $(distdir).tar
-	-touch -d @$(SOURCE_DATE_EPOCH) $(distdir).tar
+	@if test -n '$(source_date_iso)'; then \
+	  echo "touch -d '$(source_date_iso)' $(distdir).tar"; \
+	  touch -d '$(source_date_iso)' $(distdir).tar; fi
 	unset XZ_OPT; xz -e -f $(distdir).tar
 	$(am__post_remove_distdir)
 
 dist-zstd: distdir
 	$(dist_tar) $(distdir) > $(distdir).tar
-	-touch -d @$(SOURCE_DATE_EPOCH) $(distdir).tar
+	@if test -n '$(source_date_iso)'; then \
+	  echo "touch -d '$(source_date_iso)' $(distdir).tar"; \
+	  touch -d '$(source_date_iso)' $(distdir).tar; fi
 	unset ZSTD_CLEVEL; zstd -19 -f -q --rm $(distdir).tar
 	$(am__post_remove_distdir)
 
@@ -142,7 +150,8 @@ dist-lzip: dist-fail
 dist-zip: dist-fail
 
 dist-fail:
-	@! echo "Only 'dist-{gzip,xz,zstd}' are supported if SOURCE_DATE_EPOCH is used." >&2
+	@echo "Only 'dist-{gzip,xz,zstd}' are supported if SOURCE_DATE_EPOCH is used." >&2
+	@exit 1
 endif
 
 #
@@ -155,5 +164,39 @@ bin-dist:
 	$(MAKE) DESTDIR="$$(pwd)/$(bin_distdir)" install
 	( cd $(bin_distdir) && $(dist_tar) * ) > $(bin_distdir).tar
 	unset GZIP; gzip $(GZIP_ENV) -n < $(bin_distdir).tar > $(bin_distfile)
-	-test -z '$(SOURCE_DATE_EPOCH)' || touch -d @$(SOURCE_DATE_EPOCH) $(bin_distfile)
+	@if test -n '$(source_date_iso)'; then \
+	  echo "touch -d '$(source_date_iso)' $(bin_distfile)"; \
+	  touch -d '$(source_date_iso)' $(bin_distfile); fi
 	rm -rf $(bin_distdir) $(bin_distdir).tar
+
+# Create cppcheck report
+cppcheck: cppcheck.txt
+
+CPPCHECKFLAGS=
+cppcheck.txt:
+	$(AM_V_GEN)$(srcdir)/util/cppcheck.sh $(CPPCHECKFLAGS) > $@
+
+# Create shellcheck report
+shellcheck: shellcheck.txt
+
+SHELLCHECK = shellcheck
+SHELLCHECKFLAGS =
+shellscripts = \
+    $(srcdir)/autogen.sh \
+    $(srcdir)/util/clang-scan-build.sh \
+    $(srcdir)/util/cppcheck.sh \
+    $(srcdir)/util/getversion.sh \
+    $(srcdir)/util/git-set-mtime.sh \
+    $(srcdir)/util/pe32edit.sh \
+    src/smartd_warning.sh \
+    src/update-smart-drivedb
+
+shellcheck.txt: $(shellscripts)
+	$(ECHO_V_GEN) '  $(SHELLCHECK) $(SHELLCHECKFLAGS) $(shellscripts) > $@'
+	@$(SHELLCHECK) $(SHELLCHECKFLAGS) $(shellscripts) > $@ || \
+	if [ $$? = 1 ]; then echo "$@: issues found"; else rm -f $@; exit 1; fi
+
+src/smartd_warning.sh: src/smartd_warning.sh.in
+	make -C src smartd_warning.sh
+src/update-smart-drivedb: src/update-smart-drivedb.in
+	make -C src update-smart-drivedb

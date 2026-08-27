@@ -3,7 +3,7 @@
  *
  * Home page of code is: https://www.smartmontools.org
  *
- * Copyright (C) 2016-25 Christian Franke
+ * Copyright (C) 2016-26 Christian Franke
  *
  * SPDX-License-Identifier: GPL-2.0-or-later
  */
@@ -25,27 +25,10 @@
 
 using namespace smartmon;
 
-// Return true if 128 bit LE integer is != 0.
-static bool le128_is_non_zero(const unsigned char (& val)[16])
-{
-  for (int i = 0; i < 16; i++) {
-    if (val[i])
-      return true;
-  }
-  return false;
-}
-
-// Convert 128 bit LE integer to uint64_t or its max value on overflow.
-static uint64_t le128_to_uint64(const unsigned char (& val)[16])
-{
-  if (sg_get_unaligned_le64(val + 8))
-    return ~(uint64_t)0;
-  return sg_get_unaligned_le64(val);
-}
-
 // Format 128 bit integer for printing.
 // Add value with SI prefixes if BYTES_PER_UNIT is specified.
-static const char * le128_to_str(char (& str)[64], uint64_t hi, uint64_t lo, unsigned bytes_per_unit)
+static const char * uint128_format_with_sep_and_cap(char (& str)[64],
+  uint64_t hi, uint64_t lo, unsigned bytes_per_unit)
 {
   if (!hi) {
     // Up to 64-bit, print exact value
@@ -73,24 +56,18 @@ static const char * le128_to_str(char (& str)[64], uint64_t hi, uint64_t lo, uns
 
 // Format 128 bit LE integer for printing.
 // Add value with SI prefixes if BYTES_PER_UNIT is specified.
-static const char * le128_to_str(char (& str)[64], const unsigned char (& val)[16],
+static const char * uile128_to_str(char (& str)[64], const uile128_t & val,
   unsigned bytes_per_unit = 0)
 {
-  uint64_t hi = val[15];
-  for (int i = 15-1; i >= 8; i--) {
-    hi <<= 8; hi += val[i];
-  }
-  uint64_t lo = val[7];
-  for (int i =  7-1; i >= 0; i--) {
-    lo <<= 8; lo += val[i];
-  }
-  return le128_to_str(str, hi, lo, bytes_per_unit);
+  return uint128_format_with_sep_and_cap(str,
+    uile64_to_uint(val.hi), uile64_to_uint(val.lo), bytes_per_unit);
 }
 
 // Format capacity specified as 64bit LBA count for printing.
 static const char * lbacap_to_str(char (& str)[64], uint64_t lba_cnt, int lba_bits)
 {
-  return le128_to_str(str, (lba_cnt >> (64 - lba_bits)), (lba_cnt << lba_bits), 1);
+  return uint128_format_with_sep_and_cap(str, (lba_cnt >> (64 - lba_bits)),
+    (lba_cnt << lba_bits), 1);
 }
 
 // Output capacity specified as 64bit LBA count to JSON
@@ -140,11 +117,11 @@ static void print_drive_info(const nvme_id_ctrl & id_ctrl, const nvme_id_ns & id
   jglb["nvme_ieee_oui_identifier"] = sg_get_unaligned_le(3, id_ctrl.ieee);
 
   // Capacity info is optional for devices without namespace management
-  if (show_all || le128_is_non_zero(id_ctrl.tnvmcap) || le128_is_non_zero(id_ctrl.unvmcap)) {
-    jout("Total NVM Capacity:                 %s\n", le128_to_str(buf, id_ctrl.tnvmcap, 1));
-    jglb["nvme_total_capacity"].set_unsafe_le128(id_ctrl.tnvmcap);
-    jout("Unallocated NVM Capacity:           %s\n", le128_to_str(buf, id_ctrl.unvmcap, 1));
-    jglb["nvme_unallocated_capacity"].set_unsafe_le128(id_ctrl.unvmcap);
+  if (show_all || uile128_clamp_to_uint64(id_ctrl.tnvmcap) || uile128_clamp_to_uint64(id_ctrl.unvmcap)) {
+    jout("Total NVM Capacity:                 %s\n", uile128_to_str(buf, id_ctrl.tnvmcap, 1));
+    jglb["nvme_total_capacity"].set_unsafe_uile128(id_ctrl.tnvmcap);
+    jout("Unallocated NVM Capacity:           %s\n", uile128_to_str(buf, id_ctrl.unvmcap, 1));
+    jglb["nvme_unallocated_capacity"].set_unsafe_uile128(id_ctrl.unvmcap);
   }
 
   jout("Controller ID:                      %d\n", id_ctrl.cntlid);
@@ -496,7 +473,7 @@ static void print_smart_log(const nvme_smart_log & smart_log,
   jout("Critical Warning:                   0x%02x\n", smart_log.critical_warning);
   jref["critical_warning"] = smart_log.critical_warning;
 
-  int k = sg_get_unaligned_le16(smart_log.temperature);
+  int k = uile16_to_uint(smart_log.temperature);
   jout("Temperature:                        %s\n", kelvin_to_str(buf, k));
   if (k) {
     jref["temperature"] = k - 273;
@@ -514,38 +491,40 @@ static void print_smart_log(const nvme_smart_log & smart_log,
   jout("Percentage Used:                    %u%%\n", smart_log.percent_used);
   jref["percentage_used"] = smart_log.percent_used;
   jglb["endurance_used"]["current_percent"] = smart_log.percent_used;
-  jout("Data Units Read:                    %s\n", le128_to_str(buf, smart_log.data_units_read, 1000*512));
-  jref["data_units_read"].set_unsafe_le128(smart_log.data_units_read);
-  jglb["host_reads"]["units"].set_unsafe_le128(smart_log.data_units_read);
+  jout("Data Units Read:                    %s\n", uile128_to_str(buf,
+    smart_log.data_units_read, 1000*512));
+  jref["data_units_read"].set_unsafe_uile128(smart_log.data_units_read);
+  jglb["host_reads"]["units"].set_unsafe_uile128(smart_log.data_units_read);
   jglb["host_reads"]["bytes_per_unit"] = 1000*512;
   jglb["host_reads"]["string"] = format_capacity(buf, sizeof(buf),
-    le128_to_uint64(smart_log.data_units_read) * (1000*512), ".");
-  jout("Data Units Written:                 %s\n", le128_to_str(buf, smart_log.data_units_written, 1000*512));
-  jref["data_units_written"].set_unsafe_le128(smart_log.data_units_written);
-  jglb["host_writes"]["units"].set_unsafe_le128(smart_log.data_units_written);
+    uile128_clamp_to_uint64(smart_log.data_units_read) * (1000*512), ".");
+  jout("Data Units Written:                 %s\n", uile128_to_str(buf,
+    smart_log.data_units_written, 1000*512));
+  jref["data_units_written"].set_unsafe_uile128(smart_log.data_units_written);
+  jglb["host_writes"]["units"].set_unsafe_uile128(smart_log.data_units_written);
   jglb["host_writes"]["bytes_per_unit"] = 1000*512;
   jglb["host_writes"]["string"] = format_capacity(buf, sizeof(buf),
-    le128_to_uint64(smart_log.data_units_written) * (1000*512), ".");
-  jout("Host Read Commands:                 %s\n", le128_to_str(buf, smart_log.host_reads));
-  jref["host_reads"].set_unsafe_le128(smart_log.host_reads);
-  jglb["host_reads"]["commands"].set_unsafe_le128(smart_log.host_reads);
-  jout("Host Write Commands:                %s\n", le128_to_str(buf, smart_log.host_writes));
-  jref["host_writes"].set_unsafe_le128(smart_log.host_writes);
-  jglb["host_writes"]["commands"].set_unsafe_le128(smart_log.host_writes);
-  jout("Controller Busy Time:               %s\n", le128_to_str(buf, smart_log.ctrl_busy_time));
-  jref["controller_busy_time"].set_unsafe_le128(smart_log.ctrl_busy_time);
-  jout("Power Cycles:                       %s\n", le128_to_str(buf, smart_log.power_cycles));
-  jref["power_cycles"].set_unsafe_le128(smart_log.power_cycles);
-  jglb["power_cycle_count"].set_if_safe_le128(smart_log.power_cycles);
-  jout("Power On Hours:                     %s\n", le128_to_str(buf, smart_log.power_on_hours));
-  jref["power_on_hours"].set_unsafe_le128(smart_log.power_on_hours);
-  jglb["power_on_time"]["hours"].set_if_safe_le128(smart_log.power_on_hours);
-  jout("Unsafe Shutdowns:                   %s\n", le128_to_str(buf, smart_log.unsafe_shutdowns));
-  jref["unsafe_shutdowns"].set_unsafe_le128(smart_log.unsafe_shutdowns);
-  jout("Media and Data Integrity Errors:    %s\n", le128_to_str(buf, smart_log.media_errors));
-  jref["media_errors"].set_unsafe_le128(smart_log.media_errors);
-  jout("Error Information Log Entries:      %s\n", le128_to_str(buf, smart_log.num_err_log_entries));
-  jref["num_err_log_entries"].set_unsafe_le128(smart_log.num_err_log_entries);
+    uile128_clamp_to_uint64(smart_log.data_units_written) * (1000*512), ".");
+  jout("Host Read Commands:                 %s\n", uile128_to_str(buf, smart_log.host_reads));
+  jref["host_reads"].set_unsafe_uile128(smart_log.host_reads);
+  jglb["host_reads"]["commands"].set_unsafe_uile128(smart_log.host_reads);
+  jout("Host Write Commands:                %s\n", uile128_to_str(buf, smart_log.host_writes));
+  jref["host_writes"].set_unsafe_uile128(smart_log.host_writes);
+  jglb["host_writes"]["commands"].set_unsafe_uile128(smart_log.host_writes);
+  jout("Controller Busy Time:               %s\n", uile128_to_str(buf, smart_log.ctrl_busy_time));
+  jref["controller_busy_time"].set_unsafe_uile128(smart_log.ctrl_busy_time);
+  jout("Power Cycles:                       %s\n", uile128_to_str(buf, smart_log.power_cycles));
+  jref["power_cycles"].set_unsafe_uile128(smart_log.power_cycles);
+  jglb["power_cycle_count"].set_if_safe_uile128(smart_log.power_cycles);
+  jout("Power On Hours:                     %s\n", uile128_to_str(buf, smart_log.power_on_hours));
+  jref["power_on_hours"].set_unsafe_uile128(smart_log.power_on_hours);
+  jglb["power_on_time"]["hours"].set_if_safe_uile128(smart_log.power_on_hours);
+  jout("Unsafe Shutdowns:                   %s\n", uile128_to_str(buf, smart_log.unsafe_shutdowns));
+  jref["unsafe_shutdowns"].set_unsafe_uile128(smart_log.unsafe_shutdowns);
+  jout("Media and Data Integrity Errors:    %s\n", uile128_to_str(buf, smart_log.media_errors));
+  jref["media_errors"].set_unsafe_uile128(smart_log.media_errors);
+  jout("Error Information Log Entries:      %s\n", uile128_to_str(buf, smart_log.num_err_log_entries));
+  jref["num_err_log_entries"].set_unsafe_uile128(smart_log.num_err_log_entries);
 
   // Temperature thresholds are optional
   if (show_all || id_ctrl.wctemp || smart_log.warning_temp_time) {
@@ -567,15 +546,23 @@ static void print_smart_log(const nvme_smart_log & smart_log,
         jref["temperature_sensors"][i] = k - 273;
     }
   }
-  if (show_all || smart_log.thm_temp1_trans_count)
-    pout("Thermal Temp. 1 Transition Count:   %d\n", smart_log.thm_temp1_trans_count);
-  if (show_all || smart_log.thm_temp2_trans_count)
-    pout("Thermal Temp. 2 Transition Count:   %d\n", smart_log.thm_temp2_trans_count);
-  if (show_all || smart_log.thm_temp1_total_time)
-    pout("Thermal Temp. 1 Total Time:         %d\n", smart_log.thm_temp1_total_time);
-  if (show_all || smart_log.thm_temp2_total_time)
-    pout("Thermal Temp. 2 Total Time:         %d\n", smart_log.thm_temp2_total_time);
-  pout("\n");
+
+  // Thermal management values are optional (NVMe 1.3)
+  if (   show_all
+      || smart_log.thm_temp1_trans_count || smart_log.thm_temp1_total_time
+      || smart_log.thm_temp2_trans_count || smart_log.thm_temp2_total_time) {
+    jout("Thermal Temp. 1 Transition Count:   %d\n", smart_log.thm_temp1_trans_count);
+    jout("Thermal Temp. 1 Total Time:         %d\n", smart_log.thm_temp1_total_time);
+    jout("Thermal Temp. 2 Transition Count:   %d\n", smart_log.thm_temp2_trans_count);
+    jout("Thermal Temp. 2 Total Time:         %d\n", smart_log.thm_temp2_total_time);
+    jref += {
+      { "thermal_mgmt_temperature_1_transition_count", smart_log.thm_temp1_trans_count },
+      { "thermal_mgmt_temperature_1_total_time", smart_log.thm_temp1_total_time },
+      { "thermal_mgmt_temperature_2_transition_count", smart_log.thm_temp2_trans_count },
+      { "thermal_mgmt_temperature_2_total_time", smart_log.thm_temp2_total_time }
+    };
+  }
+  jout("\n");
 }
 
 static void print_error_log(const nvme_error_log_page * error_log,
@@ -737,7 +724,7 @@ static void print_self_test_log(const nvme_self_test_log & self_test_log, unsign
                 s = buf; break;
     }
 
-    uint64_t poh = sg_get_unaligned_le64(r.power_on_hours);
+    uint64_t poh = uile64_to_uint(r.power_on_hours);
 
     jrefi += {
       { "self_test_code", { { "value", op }, { "string", t } } },
@@ -759,7 +746,7 @@ static void print_self_test_log(const nvme_self_test_log & self_test_log, unsign
       jrefi["nsid"] = (r.nsid != nvme_broadcast_nsid ? (int64_t)r.nsid : -1);
     }
     if (r.valid & 0x02) {
-      uint64_t lba = sg_get_unaligned_le64(r.lba);
+      uint64_t lba = uile64_to_uint(r.lba);
       snprintf(lb, sizeof(lb), "%" PRIu64, lba);
       jrefi["lba"] = lba;
     }
@@ -811,7 +798,11 @@ int nvmePrintMain(nvme_device * device, const nvme_print_options & options)
     unsigned nsid = device->get_nsid();
     if (nsid == nvme_broadcast_nsid) {
       // Broadcast namespace
-      if (id_ctrl.nn == 1) {
+      if (!id_ctrl.nn) {
+        // No namespaces, don't print namespace information
+        nsid = 0;
+      }
+      else if (id_ctrl.nn == 1) {
         // No namespace management, get size from single namespace
         nsid = 1;
         if (!nvme_read_id_ns(device, nsid, id_ns))
@@ -867,25 +858,33 @@ int nvmePrintMain(nvme_device * device, const nvme_print_options & options)
 
   // Print Error Information Log
   if (options.error_log_entries) {
-    unsigned max_entries = id_ctrl.elpe + 1; // 0's based value
-    unsigned want_entries = options.error_log_entries;
-    if (want_entries > max_entries)
-      want_entries = max_entries;
-    raw_buffer error_log_buf(want_entries * sizeof(nvme_error_log_page));
-    nvme_error_log_page * error_log =
-      reinterpret_cast<nvme_error_log_page *>(error_log_buf.data());
+    // Assume missing log if only one entry is reported (id_ctrl.elpe = 0).
+    // This log is mandatory but some devices which emulate NVMe SMART/Health
+    // Information do not provide it.
+    if (!(id_ctrl.elpe || options.error_log_entries == 1))
+      pout("Error Information (NVMe Log 0x01) not supported"
+           " (guessed, override with '-l error,1')\n\n");
+    else {
+      unsigned max_entries = id_ctrl.elpe + 1; // 0's based value
+      unsigned want_entries = options.error_log_entries;
+      if (want_entries > max_entries)
+        want_entries = max_entries;
+      raw_buffer error_log_buf(want_entries * sizeof(nvme_error_log_page));
+      nvme_error_log_page * error_log =
+        reinterpret_cast<nvme_error_log_page *>(error_log_buf.data());
 
-    unsigned read_entries = nvme_read_error_log(device, error_log, want_entries, lpo_sup);
-    if (!read_entries) {
-      jerr("Read %u entries from Error Information Log failed: %s\n\n",
-           want_entries, device->get_errmsg());
-      return retval | FAILSMART;
+      unsigned read_entries = nvme_read_error_log(device, error_log, want_entries, lpo_sup);
+      if (!read_entries) {
+        jerr("Read %u entries from Error Information Log failed: %s\n\n",
+             want_entries, device->get_errmsg());
+        return retval | FAILSMART;
+      }
+      if (read_entries < want_entries)
+        jerr("Read Error Information Log failed, %u entries missing: %s\n",
+             want_entries - read_entries, device->get_errmsg());
+
+      print_error_log(error_log, read_entries, max_entries);
     }
-    if (read_entries < want_entries)
-      jerr("Read Error Information Log failed, %u entries missing: %s\n",
-           want_entries - read_entries, device->get_errmsg());
-
-    print_error_log(error_log, read_entries, max_entries);
   }
 
   // Check for self-test support

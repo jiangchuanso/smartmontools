@@ -1,6 +1,6 @@
 .ig
 Copyright (C) 2002-10 Bruce Allen
-Copyright (C) 2004-25 Christian Franke
+Copyright (C) 2004-26 Christian Franke
 
 SPDX-License-Identifier: GPL-2.0-or-later
 
@@ -50,8 +50,7 @@ ACS-3, ACS-2, ATA8-ACS, ATA/ATAPI-7 and earlier standards
 (equivalent to \fBsmartctl \-s on\fP) and polls these and SCSI devices
 every 30 minutes (configurable), logging SMART errors and changes of
 SMART Attributes via the SYSLOG interface.  The default location for
-these SYSLOG notifications and warnings is system-dependent
-(typically \fB/var/log/messages\fP or \fB/var/log/syslog\fP).
+these SYSLOG notifications and warnings is system-dependent.
 To change this default location, please see the \*(Aq\-l\*(Aq
 command-line option described below.
 .PP
@@ -105,7 +104,7 @@ Other state changes are reported via systemd notify STATUS messages.
 Notification of successful reloads (after \fBHUP\fP signal) is not supported.
 To detect this process start-up type, \fBsmartd\fP checks whether the
 environment variable \*(AqNOTIFY_SOCKET\*(Aq is set.
-Note that it is required to set the \*(Aq\-n\*(Aq (\*(Aq\-\-nofork\*(Aq)
+Note that it is required to set the \*(Aq\-n\*(Aq (\*(Aq\-\-no\-fork\*(Aq)
 option in the \*(AqExecStart=/usr/local/sbin/smartd\*(Aq command line
 if \*(AqType=Notify\*(Aq is used.
 .\" %ENDIF ENABLE_SYSTEMD_NOTIFY
@@ -213,10 +212,41 @@ The remaining part is protocol-specific:
 [NVMe: NEW EXPERIMENTAL SMARTD 7.5 FEATURE]
 Writes NVMe SMART/Health information as "name;value;".
 .TP
+.B \-j PREFIX, \-\-jsonstate=PREFIX
+[NEW EXPERIMENTAL SMARTD 8.0 FEATURE]
+Writes per-device JSON state files
+.br
+\*(AqPREFIX\*(Aq\*(AqMODEL\-SERIAL[\-NSID].PRT.json\*(Aq
+.br
+after each check cycle.
+For PREFIX, MODEL, SERIAL, NSID and PRT, see the \*(Aq\-A\*(Aq option above.
+.Sp
+The JSON output uses the same field names as \fBsmartctl\fP(8) \-j
+output where applicable (smart_status, temperature, ata_smart_attributes,
+nvme_smart_health_information_log, scsi_error_counter_log).
+This allows external tools to read cached SMART health data from
+the filesystem instead of running \fBsmartctl\fP for each device.
+.Sp
+Each file is replaced atomically against concurrent readers (write
+to temporary file, then rename), so readers always observe a complete
+previous or new document.
+Note that smartd does not \fBfsync\fP the data before the rename, so
+a crash may still leave an empty or truncated file after recovery.
+.Sp
+.\" %IF ENABLE_JSONSTATE
+If this option is not specified, JSON state files are written to
+.br
+\*(Aq/usr/local/var/lib/smartmontools/smartd-json.MODEL\-SERIAL[\-NSID].PRT.json\*(Aq.
+.br
+If \*(Aq\-\*(Aq is specified as the argument, JSON state files are
+disabled.
+.Sp
+.\" %ENDIF ENABLE_JSONSTATE
+.TP
 .B \-B [+]FILE, \-\-drivedb=[+]FILE
-[ATA only] Read the drive database from FILE.  The new database replaces
-the built in database by default.  If \*(Aq+\*(Aq is specified, then the new
-entries prepend the built in entries.
+[ATA][USB] Read the drive database from FILE.
+If \*(Aq+\*(Aq is not specified, the drive database is replaced.
+Otherwise the entries read from FILE prepend the local and default entries.
 Please see the \fBsmartctl\fP(8) man page for further details.
 .TP
 .B \-c FILE, \-\-configfile=FILE
@@ -308,19 +338,7 @@ for the same purpose.
 .B \-l FACILITY, \-\-logfacility=FACILITY
 Uses syslog facility FACILITY to log the messages from \fBsmartd\fP.
 Here FACILITY is one of \fIlocal0\fP, \fIlocal1\fP, ..., \fIlocal7\fP,
-or \fIdaemon\fP [default].  If this command-line option is not used,
-then by default messages from \fBsmartd\fP are logged to the facility
-\fIdaemon\fP.
-.Sp
-If you would like to have \fBsmartd\fP messages logged somewhere other
-than the default location, include (for example) \*(Aq\-l local3\*(Aq in its
-start up argument list.
-Tell the syslog daemon to log all messages from facility \fBlocal3\fP
-to (for example) \*(Aq/var/log/smartd.log\*(Aq.
-.Sp
-For more detailed information, please refer to the man pages for
-the local syslog daemon, typically \fBsyslogd\fP(8), \fBsyslog-ng\fP(8)
-or \fBrsyslogd\fP(8).
+or \fIdaemon\fP [default].
 .\" %IF OS Cygwin
 .Sp
 Cygwin: If no \fBsyslogd\fP is running, the \*(Aq\-l\*(Aq option has no effect.
@@ -550,7 +568,7 @@ See NOTES below for details.
 .\" %ENDIF OS Windows
 .TP
 .B \-V, \-\-version, \-\-license, \-\-copyright
-Prints version, copyright, license, home page and SVN revision
+Prints version, copyright, license, home page and git revision
 information for your copy of \fBsmartd\fP to STDOUT and then exits.
 .Sp
 .SH EXAMPLES

@@ -218,7 +218,11 @@ scsiGetSupportedLogPages(scsi_device * device)
     }
 
     if (got_subpages) {
+        int resp_len_max = GBUF_SIZE - LOGPAGEHDRSIZE;
+
         resp_len = sg_get_unaligned_be16(gBuf + 2);
+        if (resp_len > (resp_len_max - 2))
+            resp_len = resp_len_max - 2;
         up = gBuf + LOGPAGEHDRSIZE;
         for (k = 0; k < resp_len; k += 2) {
             uint8_t page_code = 0x3f & up[k];
@@ -431,7 +435,7 @@ scsiPrintActiveTapeAlerts(scsi_device * device, int peripheral_type,
 {
     unsigned short pagelength;
     unsigned short parametercode;
-    int i, k, j, m, err;
+    int i, j, m, err;
     const char *s;
     const char *ts;
     int failures = 0;
@@ -454,8 +458,8 @@ scsiPrintActiveTapeAlerts(scsi_device * device, int peripheral_type,
     pagelength = sg_get_unaligned_be16(gBuf + 2);
 
     json::ref jref = jglb[tapealert_s]["status"];
-    for (s=severities, k = 0, j = 0; *s; s++, ++k) {
-        for (i = 4, m = 0; i < pagelength; i += 5, ++k, ++m) {
+    for (s=severities, j = 0; *s; s++) {
+        for (i = 4, m = 0; i < pagelength; i += 5, ++m) {
             parametercode = sg_get_unaligned_be16(gBuf + i);
 
             if (gBuf[i + 4]) {
@@ -2626,6 +2630,7 @@ show_sas_port_param(int port_num, unsigned char * ucp, int param_len)
         case 9: snprintf(s, sz, "phy enabled; 3 Gbps"); break;
         case 0xa: snprintf(s, sz, "phy enabled; 6 Gbps"); break;
         case 0xb: snprintf(s, sz, "phy enabled; 12 Gbps"); break;
+        case 0xc: snprintf(s, sz, "phy enabled; 22.5 Gbps"); break;
         default: snprintf(s, sz, "reserved [%d]", t); break;
         }
         q = "negotiated logical link rate";
@@ -3810,6 +3815,7 @@ scsiPrintMain(scsi_device * device, const scsi_print_options & options)
             farm_supported = false;
         }
         jglb["seagate_farm_log"]["supported"] = farm_supported;
+        any_output = true;
     }
     if (options.smart_error_log || options.scsi_pending_defects) {
         if (options.smart_error_log) {

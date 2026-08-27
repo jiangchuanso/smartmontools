@@ -3,9 +3,9 @@
  *
  * Home page of code is: https://www.smartmontools.org
  *
- * Copyright (C) 2002-12 Bruce Allen
- * Copyright (C) 2008-25 Christian Franke
  * Copyright (C) 2000 Michael Cornwell <cornwell@acm.org>
+ * Copyright (C) 2002-12 Bruce Allen
+ * Copyright (C) 2008-26 Christian Franke
  *
  * SPDX-License-Identifier: GPL-2.0-or-later
  */
@@ -83,15 +83,20 @@ void lib_global_hook::reset()
   current_global_hook = &the_lib_global_hook;
 }
 
+SMARTMON_DIAGNOSTIC_FORMAT_NONLITERAL_IGNORE
+
 void lib_global_hook::lib_vprintf(const char * fmt, va_list ap)
 {
   vprintf(fmt, ap);
 }
 
+SMARTMON_DIAGNOSTIC_FORMAT_NONLITERAL_RESTORE
+
 void lib_vprintf(const char * fmt, va_list ap)
 {
   lib_global_hook::get().lib_vprintf(fmt, ap);
 }
+
 
 void lib_printf(const char * fmt, ...)
 {
@@ -145,7 +150,7 @@ std::string format_version_info(const char * prog_name, int lines /* = 2 */)
   if (lines <= 1)
     return info;
 
-  info += "Copyright (C) 2002-25, Bruce Allen, Christian Franke, www.smartmontools.org\n";
+  info += "Copyright (C) 2002-26, Bruce Allen, Christian Franke, www.smartmontools.org\n";
   if (lines == 2)
     return info;
 
@@ -168,7 +173,11 @@ std::string format_version_info(const char * prog_name, int lines /* = 2 */)
 #else
     "smartmontools git revision is unknown\n"
 #endif
-    "smartmontools build host: " SMARTMONTOOLS_BUILD_HOST "\n"
+    "smartmontools build host: " SMARTMONTOOLS_BUILD_HOST
+#ifdef WORDS_BIGENDIAN
+                                                        " (BE)"
+#endif
+                                                              "\n"
     "smartmontools build with: "
 
 #ifdef _MSVC_LANG // MSVC sets __cplusplus to 199711L even if a later version is enabled
@@ -971,8 +980,13 @@ static void check_endianness()
   } x = {{1, 2, 3, 4, 5, 6, 7, 8}};
   const uint64_t le = 0x0807060504030201ULL;
   const uint64_t be = 0x0102030405060708ULL;
-
-  if (!(   x.i == (isbigendian() ? be : le)
+  uint16_t be16 = (uint32_t)(le >> 48); byteswap_inplace(be16);
+  uint32_t be32 = (uint32_t)(le >> 32); byteswap_inplace(be32);
+  uint64_t be64 = le;                   byteswap_inplace(be64);
+  if (!(   x.i == (byteorder_is_big_endian ? be : le)
+        && be16 == (uint16_t)be
+        && be32 == (uint32_t)be
+        && be64 == be
         && sg_get_unaligned_le16(x.c)   == (uint16_t)le
         && sg_get_unaligned_be16(x.c+6) == (uint16_t)be
         && sg_get_unaligned_le32(x.c)   == (uint32_t)le
@@ -982,29 +996,10 @@ static void check_endianness()
     throw std::logic_error("CPU endianness does not match compile time test");
 }
 
-#if defined(__GNUC__) && (__GNUC__ >= 7)
-
-// G++ 7+: Assume sane implementation and avoid -Wformat-truncation warning
-static void check_snprintf() {}
-
-#else
-
-static void check_snprintf()
-{
-  char buf[] =              "ABCDEFGHI";
-  int n1 = snprintf(buf, 8, "123456789");
-  int n2 = snprintf(buf, 0, "X");
-  if (!(!strcmp(buf, "1234567") && n1 == 9 && n2 == 1))
-    throw std::logic_error("Function snprintf() does not conform to C99");
-}
-
-#endif
-
 // Runtime check of ./configure result, throws on error.
 void check_config()
 {
   check_endianness();
-  check_snprintf();
 }
 
 } // namespace smartmon
