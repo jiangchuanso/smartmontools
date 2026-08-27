@@ -1,3 +1,5 @@
+[English](README.md) | [中文](README-zh.md)
+
 ## About Smartmontools
 The smartmontools package contains two utility programs (`smartctl` and `smartd`) 
 to control and monitor storage systems using the **Self-Monitoring, Analysis and 

@@ -1,3 +1,5 @@
+[中文](README-zh.md) | [English](README.md)
+
 ## 关于 Smartmontools
 
 smartmontools 软件包包含两款实用程序（`smartctl` 与 `smartd`），用于控制并监控
