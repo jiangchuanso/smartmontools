@@ -726,7 +726,7 @@ os_man_filter=
 os_unmaintained=
 case "${host}" in
   *-*-linux*)
-    os_deps='os_linux.lo cciss.lo dev_areca.lo'
+    os_deps='os_linux.lo cciss.lo dev_areca.lo dev_ps3stor.lo'
     os_dnsdomainname="'dnsdomainname' 'hostname -d'"
     os_nisdomainname="'nisdomainname' 'hostname -y' 'domainname'"
     os_man_filter=Linux
