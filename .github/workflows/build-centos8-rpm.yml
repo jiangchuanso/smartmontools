@@ -120,7 +120,7 @@ jobs:
             -e SMARTMONTOOLS_PKG_VER \
             -v "$PWD":/src -w /src centos:8 \
             bash -c '
-              set -e
+              set -ex
               # CentOS 8 is end-of-life: the default mirrorlist is dead, so
               # repoint the repos to vault.centos.org before installing anything.
               sed -i "s/mirrorlist/#mirrorlist/g; s|#baseurl=http://mirror.centos.org|baseurl=http://vault.centos.org|g" /etc/yum.repos.d/CentOS-Linux-*.repo || true
@@ -136,16 +136,9 @@ jobs:
               cp -v /src/artifacts/smartmontools-${SMARTMONTOOLS_PKG_VER}.tar.gz \
                     /root/rpmbuild/SOURCES/
 
-              # Warn (but do not fail) if the Version: field in the spec file
-              # is out of sync with configure.ac: the '--define version ...'
-              # below enforces the correct value anyway.
-              spec_ver=$(sed -n "s/^Version:[[:space:]]*//p" /src/smartmontools.spec | head -n 1)
-              test "$spec_ver" = "$SMARTMONTOOLS_PKG_VER" || \
-                echo "::warning::smartmontools.spec Version: $spec_ver does not match configure.ac ($SMARTMONTOOLS_PKG_VER); overriding with --define version ..."
-
               # Build the RPM. "dist .el8" pins the release tag; the version
-              # is taken from configure.ac so spec and configure.ac can never
-              # drift apart.
+              # is taken from configure.ac (--define below) so spec and
+              # configure.ac can never drift apart.
               rpmbuild -bb \
                 --define "_topdir /root/rpmbuild" \
                 --define "dist .el8" \
