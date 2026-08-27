@@ -32,8 +32,8 @@ BuildRequires:  gcc-c++
 BuildRequires:  make
 BuildRequires:  rpm-build
 BuildRequires:  systemd-devel
-# Provides the %systemd_post/%systemd_preun/%systemd_postun macros and the
-# %{_unitdir} macro used in %post/%preun/%postun and %files.
+# Provides the systemd_post/systemd_preun/systemd_postun macros and the
+# _unitdir macro used in the post/preun/postun sections and in %files.
 BuildRequires:  systemd-rpm-macros
 
 %description
