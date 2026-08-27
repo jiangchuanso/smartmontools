@@ -34,8 +34,15 @@ jobs:
         uses: actions/checkout@v4
         with:
           # smartmontools computes its version string from the git log
-          # (util/getversion.sh), so a reasonably deep clone is required.
-          fetch-depth: 3500
+          # (util/getversion.sh). This is a pre-release build
+          # (smartmontools_release_date is empty in configure.ac), so
+          # getversion.sh needs the smartmontools 7.5 base revision
+          # (943adaeda55c2d534c722fe66c6b4613a782caa1) to compute the emulated
+          # svn revision and the pre-release commit counter. A shallow clone
+          # (e.g. fetch-depth: 3500) would miss it because this fork has more
+          # than 3500 commits, silently producing version strings like
+          # "8.0-gREV" without the commit count. Use a full clone instead.
+          fetch-depth: 0
           fetch-tags: true
 
       - name: Set up QEMU (aarch64 only)
@@ -61,7 +68,8 @@ jobs:
               sed -i "s/mirrorlist/#mirrorlist/g; s|#baseurl=http://mirror.centos.org|baseurl=http://vault.centos.org|g" /etc/yum.repos.d/CentOS-Linux-*.repo || true
 
               dnf -y install gcc-c++ make rpm-build gzip tar git \
-                  autoconf automake libtool systemd-devel
+                  autoconf automake libtool systemd-devel \
+                  systemd-rpm-macros  # provides %%systemd_post, %%{_unitdir}, ...
 
               mkdir -p /root/rpmbuild/{BUILD,RPMS,SRPMS,SOURCES,SPECS}
 
@@ -77,8 +85,11 @@ jobs:
               ./autogen.sh --force
               ./configure
               make dist
-              ls -l smartmontools-*.tar.gz
-              cp -v smartmontools-8.0.tar.gz /root/rpmbuild/SOURCES/
+              # Copy the release tarball into the rpmbuild SOURCES dir.
+              # Use a glob instead of a hard-coded version: 'make dist' derives
+              # the tarball name from configure.ac, so hard-coding it here
+              # would break the workflow on the next version bump.
+              cp -v smartmontools-*.tar.gz /root/rpmbuild/SOURCES/
 
               # Build the RPM. "dist .el8" pins the release tag. Keep Version in
               # /src/smartmontools.spec in sync with configure.ac (currently 8.0).

@@ -29,6 +29,9 @@ BuildRequires:  gcc-c++
 BuildRequires:  make
 BuildRequires:  rpm-build
 BuildRequires:  systemd-devel
+# Provides the %systemd_post/%systemd_preun/%systemd_postun macros and the
+# %{_unitdir} macro used in %post/%preun/%postun and %files.
+BuildRequires:  systemd-rpm-macros
 
 %description
 smartmontools provides the smartctl command line tool and the smartd daemon
