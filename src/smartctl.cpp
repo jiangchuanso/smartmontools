@@ -190,7 +190,7 @@ static void Usage()
 "        sasphy[,reset], sataphy[,reset], scttemp[sts,hist],\n"
 "        scttempint,N[,p], scterc[,N,M][,p|reset], devstat[,N], defects[,N],\n"
 "        ssd, gplog,N[,RANGE], smartlog,N[,RANGE], nvmelog,N,SIZE\n"
-"        tapedevstat, zdevstat, envrep, farm\n\n"
+"        tapedevstat, zdevstat, envrep, farm, ps3ssd\n\n"
 "  -v N,OPTION , --vendorattribute=N,OPTION                            (ATA)\n"
 "        Set display OPTION for vendor Attribute N (see man page)\n\n"
 "  -F TYPE, --firmwarebug=TYPE                                         (ATA)\n"
@@ -258,7 +258,7 @@ static std::string getvalidarglist(int opt)
            "scttemp[sts,hist], scttempint,N[,p], "
            "scterc[,N,M][,p|reset], devstat[,N], defects[,N], "
            "ssd, gplog,N[,RANGE], smartlog,N[,RANGE], "
-           "nvmelog,N,SIZE, tapedevstat, zdevstat, envrep, farm";
+           "nvmelog,N,SIZE, tapedevstat, zdevstat, envrep, farm, ps3ssd";
   case 'P':
     return "use, ignore, show, showall";
   case 't':
@@ -568,6 +568,8 @@ static int parse_options(int argc, char** argv, const char * & type,
         ataopts.sct_temp_hist = true;
       } else if (!strcmp(optarg,"farm")) {
         ataopts.farm_log = scsiopts.farm_log = true; // Seagate Field Access Reliability Metrics (FARM) log
+      } else if (!strcmp(optarg,"ps3ssd")) {
+        ataopts.ps3_ssd_log = true; // SSD vendor health log (GP Log 0xe4/0xe5) for PS3 storage scenario
       } else if (!strcmp(optarg,"tapealert")) {
         scsiopts.tape_alert = true;
       } else if (!strcmp(optarg,"tapedevstat")) {
