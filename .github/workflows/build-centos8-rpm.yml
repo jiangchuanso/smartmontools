@@ -1,0 +1,170 @@
+name: Build CentOS 8 RPMs (smartmontools)
+
+# Publishes CentOS 8 (el8) RPMs for both x86_64 and aarch64 on every GitHub
+# release. The binary is built *inside* a CentOS 8 container, so it links
+# against the CentOS 8 glibc and is guaranteed runtime-compatible.
+#
+# Trigger:
+#   - A published GitHub Release (assets are attached automatically)
+#   - Manual run via workflow_dispatch (artifacts are uploaded only)
+#
+# Layout (borrowed from build.yml / build-manually.yml):
+#   - 'make-src-tgz' creates the release tarball with 'make dist' and exports
+#     the version information (SMARTMONTOOLS_PKG_VER, GIT_VER_FNAME and
+#     SOURCE_DATE_EPOCH) to the RPM jobs via job outputs.
+#   - 'build-rpm' consumes that tarball inside a CentOS 8 container, so the
+#     version number never has to be hard-coded in the workflow.
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+
+permissions:
+  contents: write   # needed to attach assets to the release
+
+jobs:
+  make-src-tgz:
+    name: Create smartmontools dist
+    runs-on: ubuntu-latest
+    outputs:
+      SOURCE_DATE_EPOCH: ${{ steps.set-env.outputs.SOURCE_DATE_EPOCH }}
+      SMARTMONTOOLS_PKG_VER: ${{ steps.set-env.outputs.SMARTMONTOOLS_PKG_VER }}
+      SMARTMONTOOLS_GIT_VER_FNAME: ${{ steps.set-env.outputs.SMARTMONTOOLS_GIT_VER_FNAME }}
+
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          # smartmontools computes its version string from the git log
+          # (util/getversion.sh). This is a pre-release build
+          # (smartmontools_release_date is empty in configure.ac), so
+          # getversion.sh needs the smartmontools 7.5 base revision
+          # (943adaeda55c2d534c722fe66c6b4613a782caa1) to compute the emulated
+          # svn revision and the pre-release commit counter. A shallow clone
+          # (e.g. fetch-depth: 3500) would miss it because this fork has more
+          # than 3500 commits, silently producing version strings like
+          # "8.0-gREV" without the commit count. Use a full clone instead.
+          fetch-depth: 0
+          # Include (future) release tags for 'getversion.sh'
+          fetch-tags: true
+
+      - name: Setting environment variables
+        id: set-env
+        run: |
+          version_sh=$(util/getversion.sh -s) && eval "${version_sh}" &&
+          SOURCE_DATE_EPOCH=$((SMARTMONTOOLS_GIT_REV_EPOCH + 1)) &&
+          echo SOURCE_DATE_EPOCH=${SOURCE_DATE_EPOCH} >> $GITHUB_ENV &&
+          echo SMARTMONTOOLS_PKG_VER=${SMARTMONTOOLS_PKG_VER} >> $GITHUB_ENV &&
+          echo SMARTMONTOOLS_GIT_VER_FNAME=${SMARTMONTOOLS_GIT_VER_FNAME} >> $GITHUB_ENV &&
+          cat $GITHUB_ENV | tee $GITHUB_OUTPUT
+
+      - name: Creating src.tar.gz
+        run: |
+          util/git-set-mtime.sh -f -q &&
+          ./autogen.sh --force &&
+          mkdir build && cd build &&
+          ../configure SOURCE_DATE_EPOCH=${SOURCE_DATE_EPOCH} &&
+          make dist && tar -tvzf "smartmontools-${SMARTMONTOOLS_PKG_VER}.tar.gz"
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: smartmontools-src
+          path: build/smartmontools-*.tar.gz
+          retention-days: 1
+
+  build-rpm:
+    name: Build RPM for ${{ matrix.arch }}
+    needs: make-src-tgz
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: x86_64
+            platform: linux/amd64
+          - arch: aarch64
+            platform: linux/arm64
+
+    env:
+      SOURCE_DATE_EPOCH: ${{ needs.make-src-tgz.outputs.SOURCE_DATE_EPOCH }}
+      SMARTMONTOOLS_PKG_VER: ${{ needs.make-src-tgz.outputs.SMARTMONTOOLS_PKG_VER }}
+
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v6
+        with:
+          # Only the spec file is needed to build the RPM; the version
+          # information comes from the release tarball of the 'make-src-tgz'
+          # job, so a single commit is sufficient.
+          fetch-depth: 1
+
+      - name: Set up QEMU (aarch64 only)
+        if: matrix.arch == 'aarch64'
+        uses: docker/setup-qemu-action@v3
+        with:
+          platforms: arm64
+
+      - name: Download source tarball
+        uses: actions/download-artifact@v8
+        with:
+          name: smartmontools-src
+          path: artifacts
+
+      - name: Build RPM in CentOS 8 container
+        env:
+          PLATFORM: ${{ matrix.platform }}
+        run: |
+          set -eux
+          docker run --rm --platform "$PLATFORM" \
+            -e SOURCE_DATE_EPOCH \
+            -e SMARTMONTOOLS_PKG_VER \
+            -v "$PWD":/src -w /src centos:8 \
+            bash -c '
+              set -ex
+              # CentOS 8 is end-of-life: the default mirrorlist is dead, so
+              # repoint the repos to vault.centos.org before installing anything.
+              sed -i "s/mirrorlist/#mirrorlist/g; s|#baseurl=http://mirror.centos.org|baseurl=http://vault.centos.org|g" /etc/yum.repos.d/CentOS-Linux-*.repo || true
+
+              dnf -y install gcc-c++ make rpm-build gzip tar \
+                  systemd-devel systemd-rpm-macros
+
+              mkdir -p /root/rpmbuild/{BUILD,RPMS,SRPMS,SOURCES,SPECS}
+
+              # Install the release tarball into the rpmbuild SOURCES dir.
+              # The version number comes from configure.ac (exported by the
+              # make-src-tgz job), so it cannot go stale.
+              cp -v /src/artifacts/smartmontools-${SMARTMONTOOLS_PKG_VER}.tar.gz \
+                    /root/rpmbuild/SOURCES/
+
+              # Build the RPM. "dist .el8" pins the release tag; the version
+              # is taken from configure.ac (--define below) so spec and
+              # configure.ac can never drift apart.
+              rpmbuild -bb \
+                --define "_topdir /root/rpmbuild" \
+                --define "dist .el8" \
+                --define "version ${SMARTMONTOOLS_PKG_VER}" \
+                /src/smartmontools.spec
+
+              # Copy the RPM(s) back to the workspace
+              cp -v /root/rpmbuild/RPMS/*/*.rpm /src/
+
+              # Smoke test: install the freshly built package and run the binaries
+              rpm -Uvh /root/rpmbuild/RPMS/*/smartmontools-*.el8.*.rpm
+              /usr/sbin/smartctl --version
+              /usr/sbin/smartd --version
+              /usr/sbin/smartctl --scan || true
+            '
+
+      - name: Upload RPM artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: smartmontools-el8-${{ matrix.arch }}
+          path: "*.rpm"
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Attach RPM to GitHub release
+        if: github.event_name == 'release'
+        uses: softprops/action-gh-release@v2
+        with:
+          files: "*.rpm"
