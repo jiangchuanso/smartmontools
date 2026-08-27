@@ -32,20 +32,19 @@ smartmon/smartmon_config.h: ../config.h Makefile
 	  -e 's/^!!/error: config.h: invalid line: /' \
 	  < ../config.h >> $@.tmp
 	@echo '#endif // _SMARTMON_CONFIG_H' >> $@.tmp
-	@! grep '^error: ' $@.tmp
+	@if grep '^error: ' $@.tmp; then exit 1; fi
 	$(AM_V_at)mv -f $@.tmp $@
 
 # Get version info
 smartmon/version.h: smartmon/version.sh
-	$(AM_V_GEN)$(top_srcdir)/src/getversion.sh -i < smartmon/version.sh > $@.tmp
+	$(AM_V_GEN)$(top_srcdir)/util/getversion.sh -i < smartmon/version.sh > $@.tmp
 	$(AM_V_at)mv -f $@.tmp $@
 
-smartmon/version.sh: ../src/getversion.sh ../config.h ../Makefile \
-                     Makefile ../lib/Makefile ../src/Makefile
+smartmon/version.sh: ../util/getversion.sh ../config.h Makefile
 	$(AM_V_at)$(MKDIR_P) smartmon
-	$(AM_V_GEN)$(top_srcdir)/src/getversion.sh -s > $@.tmp
+	$(AM_V_GEN)$(top_srcdir)/util/getversion.sh -s > $@.tmp
 	$(AM_V_at)mv -f $@.tmp $@
-	@! $(AM_V_P) || cat $@
+	@if $(AM_V_P); then cat $@; fi
 
 smartmon_headers = \
         smartmon/ata.h \
@@ -53,6 +52,7 @@ smartmon_headers = \
         smartmon/byteorder.h \
         smartmon/dev_interface.h \
         smartmon/farmcmds.h \
+        smartmon/hexdump.h \
         smartmon/json.h \
         smartmon/knowndrives.h \
         smartmon/nvme.h \

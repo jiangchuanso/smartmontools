@@ -53,8 +53,8 @@
   <PropertyGroup Label="Globals">
     <VCProjectVersion>17.0</VCProjectVersion>
     <Keyword>Win32Proj</Keyword>
-    <ProjectGuid>{d93ca0c8-3d5c-419e-9b9b-af53139cdca3}</ProjectGuid>
-    <RootNamespace>lsdisk</RootNamespace>
+    <ProjectGuid>{6ea669aa-c07f-4679-8643-a69a80c21af6}</ProjectGuid>
+    <RootNamespace>hexdump</RootNamespace>
     <WindowsTargetPlatformVersion>10.0</WindowsTargetPlatformVersion>
   </PropertyGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.Default.props" />
@@ -393,7 +393,7 @@
     </Link>
   </ItemDefinitionGroup>
   <ItemGroup>
-    <ClCompile Include="..\..\..\..\src\examples\lsdisk.cpp" />
+    <ClCompile Include="..\..\..\..\src\examples\hexdump.cpp" />
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="..\libsmartmon.vcxproj">

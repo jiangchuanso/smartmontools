@@ -4,16 +4,15 @@
 #
 
 if REPRODUCIBLE_BUILD
-set_source_date_epoch = SOURCE_DATE_EPOCH=$(SOURCE_DATE_EPOCH)
-def_source_date_epoch = -D$(set_source_date_epoch)
+@dot_export@ SOURCE_DATE_EPOCH
 if OS_DARWIN
-export ZERO_AR_DATE := 1
+ZERO_AR_DATE = 1
+@dot_export@ ZERO_AR_DATE
 endif
 endif
 
 # TODO: Remove SMARTMONTOOLS_SYSCONFDIR and SMARTMONTOOLS_DRIVEDBDIR dependency
 AM_CPPFLAGS = \
-        $(def_source_date_epoch) \
         -DBUILD_INFO='$(BUILD_INFO)' \
         -DSMARTMONTOOLS_SYSCONFDIR='"$(sysconfdir)"' \
          -I ../include -I$(top_srcdir)/include
@@ -29,14 +28,23 @@ if NEED_REGEX
 AM_CPPFLAGS += -I$(top_srcdir)/include/smartmon/regex -D_REGEX_STANDALONE
 endif
 
+# Suppress 'echo' if './configure --enable-silent-rules' or 'make V=0' is used.
+# Variables AM_V_* are provided by automake >= 1.13.
+ECHO_V = ! $(AM_V_P) || echo
+ECHO_V_GEN = @$(AM_V_P) || echo '  GEN      $@'; $(ECHO_V)
+
 if INSTALL_DEVEL_LIB
 
 lib_LTLIBRARIES = libsmartmon.la
 
-if REPRODUCIBLE_BUILD_STATIC_LIB
-# Remove timestamps from static library
+if REPRODUCIBLE_BUILD
+# Remove timestamps from possible static and import libraries because libtool
+# offers no way to pass '-D' to 'ranlib'.
 install-exec-hook:
-	$(objcopy_deterministic) $(DESTDIR)$(libdir)/libsmartmon.a
+	@for f in $(DESTDIR)$(libdir)/*.a; do if [ -f "$$f" ]; then \
+	  echo " $(objcopy_deterministic) '$$f'"; \
+	  $(objcopy_deterministic) "$$f" || exit $?; \
+	fi; done
 endif
 
 else
@@ -52,8 +60,8 @@ libsmartmon_la_SOURCES = \
         dev_interface.cpp \
         dev_jmb39x_raid.cpp \
         dev_tunnelled.h \
-        drivedb.h \
         farmcmds.cpp \
+        hexdump.cpp \
         knowndrives.cpp \
         nvmecmds.cpp \
         json.cpp \
@@ -112,6 +120,11 @@ libsmartmon_la_SOURCES += \
         os_win32/popen_win32.cpp
 endif
 
+if OS_OS2
+# OS/2 DLLs do not support undefined symbols
+libsmartmon_la_LDFLAGS = -no-undefined
+endif
+
 if NEED_REGEX
 
 libsmartmon_la_SOURCES += \
@@ -130,72 +143,31 @@ if ENABLE_DRIVEDB
 drivedbinst_DATA = drivedb.h
 endif
 
-examples_cpp = \
-        examples/ata-standby.cpp \
-        examples/lsdisk.cpp
+knowndrives.lo: drivedb.h
 
-if INSTALL_DEVEL_SRC
-develsrc_DATA = \
-        examples/Makefile \
-        $(examples_cpp)
-endif
+# Create drive database file with updated "VERSION: ..." string using same
+# syntax as on drivedb branches.
+drivedb.h: ../drivedb/drivedb.h Makefile ../include/smartmon/version.sh
+	$(ECHO_V_GEN) ' sed $$(ADD_VERSION) $(top_srcdir)/drivedb/drivedb.h > $@'
+	@. ../include/smartmon/version.sh && \
+	r=$$SMARTMONTOOLS_GIT_REV && d=$$SMARTMONTOOLS_GIT_REV_DATE && \
+	t=$$SMARTMONTOOLS_GIT_REV_TIME && s=$$SMARTMONTOOLS_GIT_SVN_REV && \
+	x="/$$s $$d $$t +0000 $$r" && \
+	if [ "$${r:+y}$${d:+y}$${t:+y}$${s:+y}" != "yyyy" ]; then \
+	  if [ "$$SMARTMONTOOLS_TEST_BUILD" != "1" ]; then \
+	    echo "../include/smartmon/version.sh: missing version information" >&2; \
+	    echo "Use this to override:" >&2; \
+	    echo "export SMARTMONTOOLS_TEST_BUILD=1" >&2; exit 1; \
+	  fi; \
+	  x=" (unknown)"; \
+	fi && \
+	sed 's,^\(  { "VERSION: [1-9][0-9]*\.[0-9][0-9]*\)",\1'"$$x"'",' \
+	  $(top_srcdir)/drivedb/drivedb.h > $@.tmp && \
+	mv -f $@.tmp $@
 
-if INSTALL_DEVEL_BIN
-
-all-local: examples
-install-exec-local: install-examples
-uninstall-local: uninstall-examples
-installdirs-local: installdir-examples
-
-else
-
-# Build examples and report failure via a GHA annotation instead of nonzero exit status
-check:
-	$(MAKE) examples || echo '::error:: Build of libsmartmon examples failed'
-
-endif
-
-EXTRA_DIST = \
-        examples/Makefile.in \
-        $(examples_cpp)
-
-.PHONY: examples install-examples uninstall-examples installdir-examples clean-examples
-
-examples: examples.stamp
-
-examples.stamp: libsmartmon.la examples/Makefile examples/make.sh
-	$(AM_V_at)cd examples && ./make.sh clean && ./make.sh
-	$(AM_V_at)touch $@
-
-examples/Makefile: examples/Makefile.in ../Makefile
-	$(MAKE) -C .. lib/examples/Makefile
-
-examples/make.sh: Makefile
-	$(AM_V_GEN)(echo "#!$(SHELL)$$(test '$(V)' = 0 || echo ' -x')"; \
-	  echo "exec $(MAKE)$$(test '$(V)' = 0 && echo ' V=0') \\"; \
-	  echo "  VPATH='$(abs_top_srcdir)/lib/examples' \\"; \
-	  echo "  CXX='$(CXX)' \\"; \
-	  echo "  CPPFLAGS='-I../../include -I$(abs_top_srcdir)/include $(examples_cppflags)' \\"; \
-	  echo "  LDFLAGS='-L../.libs $(examples_ldflags)' \\"; \
-	  echo "  SBINDIR='$(develbindir)' \\"; \
-	  echo '  "$$@"') > $@.tmp
-	$(AM_V_at)chmod +x $@.tmp
-	$(AM_V_at)mv -f $@.tmp $@
-
-install-examples: examples
-	cd examples && ./make.sh DESTDIR=$(DESTDIR) install
-
-uninstall-examples:
-	! test -f examples/make.sh || (cd examples && ./make.sh DESTDIR=$(DESTDIR) uninstall)
-
-installdir-examples:
-	$(MKDIR_P) $(DESTDIR)$(develbindir)
-
-clean-examples:
-	! test -f examples/make.sh || (cd examples && ./make.sh clean)
-	rm -f examples/make.sh examples/make.sh.tmp examples.stamp
-
-clean-local: clean-examples
+CLEANFILES = \
+        drivedb.h \
+        drivedb.h.tmp
 
 # 'make maintainer-clean' also removes files generated by './autogen.sh'
 MAINTAINERCLEANFILES = \

@@ -3,16 +3,18 @@
 ;
 ; Home page of code is: https://www.smartmontools.org
 ;
-; Copyright (C) 2006-25 Christian Franke
+; Copyright (C) 2006-26 Christian Franke
 ;
 ; SPDX-License-Identifier: GPL-2.0-or-later
 ;
 
 
 ;--------------------------------------------------------------------
-; Command line arguments:
+; Command line arguments (all defines are optional):
 ; makensis -DINPDIR=<input-dir> -DINPDIR64=<input-dir-64-bit> \
-;   -DOUTFILE=<output-file> -DVERSTR=<version-string> -DYY=<year> \
+;   -DOUTFILE=<output-file> -DVERSION=<version> \
+;   -DVERSTR=<display-version> -DYY=<version-year> \
+;   -D[IM|EX]PORT_UNINST \
 ;   installer.nsi
 
 !ifndef INPDIR
@@ -66,6 +68,7 @@ LicenseData "${INPDIR}\doc\COPYING.txt"
 !include "FileFunc.nsh"
 !include "LogicLib.nsh"
 !include "Sections.nsh"
+!include "x64.nsh"
 
 
 ;--------------------------------------------------------------------
@@ -209,7 +212,8 @@ Section "!Documentation" DOC_SECTION
   Delete "$INSTDIR\doc\ChangeLog-6.0-7.0.txt" ; TODO: Remove after smartmontools 8.1
   Delete "$INSTDIR\doc\ChangeLog-7.0-7.5.txt"; TODO: Remove after smartmontools 8.1
   File "${INPDIR}\doc\COPYING.txt"
-  File "${INPDIR}\doc\INSTALL.txt"
+  File "${INPDIR}\doc\INSTALL.md"
+  Delete "$INSTDIR\doc\INSTALL.txt" ; TODO: Remove after smartmontools 8.1
   Delete "$INSTDIR\doc\NEWS.txt" ; TODO: Remove after smartmontools 8.1
   File "${INPDIR}\doc\README.md"
   Delete "$INSTDIR\doc\README.txt" ; TODO: Remove after smartmontools 8.1
@@ -258,22 +262,24 @@ Section "Uninstaller" UNINST_SECTION
   WriteRegDWORD HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\smartmontools" "NoModify" 1
   WriteRegDWORD HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\smartmontools" "NoRepair" 1
 
-  Goto +2 ; Use dummy SetOutPath to control archive location of uninstaller
-    SetOutPath "$INSTDIR"
+  SetOutPath "$INSTDIR"
+!ifdef IMPORT_UNINST
+  File "uninst-smartmontools.exe"
+!else
   WriteUninstaller "uninst-smartmontools.exe"
+!endif
 
 SectionEnd
 
-; Run dummy "signing" command after creation of the uninstaller.
-; This avoids that the uninstaller inherits the file header
-; from the installer.  Otherwise some header fields (checksum,
-; security directory entry) of the uninstaller would be invalid if
-; the installer file is later modified by code signing.
-!if "${NSIS_PACKEDVERSION}" >= 0x03008000 ; Requires NSIS >= 3.08
-  !uninstfinalize "echo uninstfinalize %1"
-!else
-  !warning "NSIS ${NSIS_VERSION} (< v3.08): uninstaller may not work if installer is signed"
-!endif
+!ifdef EXPORT_UNINST
+  ; Export the uninstaller for 'makensis -DIMPORT_UNINST'
+  !system 'exit 256' STATUS ; POSIX systems truncate STATUS to 8 bit
+  !if ${STATUS} = 256 ; Assume native build
+    !uninstfinalize 'echo copy /Y "%1" uninst-smartmontools.exe&copy /Y "%1" uninst-smartmontools.exe >nul'
+  !else ; Assume cross build
+    !uninstfinalize 'cp -fv "%1" uninst-smartmontools.exe'
+  !endif
+!endif ; EXPORT_UNINST
 
 Section "Start Menu Shortcuts" MENU_SECTION
 
@@ -371,7 +377,12 @@ Section "Start Menu Shortcuts" MENU_SECTION
   ; drivedb.h update
   ${If} ${FileExists} "$INSTDIR\bin\update-smart-drivedb.ps1"
     SetOutPath "$INSTDIR\bin"
-    !insertmacro CreateAdminShortCut "$SMPROGRAMS\smartmontools\drivedb.h update (ps1).lnk" "$INSTDIR\bin\runcmdu.exe" "powershell -NoProfile -ExecutionPolicy Bypass .\update-smart-drivedb.ps1"
+!ifdef IMPORT_UNINST ; If importing a signed uninstaller ...
+    StrCpy $0 "AllSigned" ; ... assume that 'update-smart-drivedb.ps1' is also signed
+!else
+    StrCpy $0 "Bypass"
+!endif
+    !insertmacro CreateAdminShortCut "$SMPROGRAMS\smartmontools\drivedb.h update (ps1).lnk" "$INSTDIR\bin\runcmdu.exe" "powershell -NoProfile -ExecutionPolicy $0 .\update-smart-drivedb.ps1"
     ${If} ${FileExists} "$INSTDIR\doc\README.md"
       CreateShortCut "$SMPROGRAMS\smartmontools\Documentation\drivedb.h update help (ps1).lnk" "$INSTDIR\bin\runcmdu.exe" 'powershell -NoProfile -ExecutionPolicy Bypass "Get-Help .\update-smart-drivedb.ps1 -Detail | more"'
     ${EndIf}
@@ -385,14 +396,38 @@ Section "Start Menu Shortcuts" MENU_SECTION
 
 SectionEnd
 
-Section "Add install dir to PATH" PATH_SECTION
+SectionGroup "Add install dir to PATH"
 
-  SectionIn ${FULL_TYPES}
+  Section "Add install dir to User PATH" USR_PATH_SECTION
+    SectionIn ${FULL_TYPES}
+    Push "User"
+    Push "$INSTDIR\bin"
+    Call AddToPath
+    Pop $0
+    ${If} $0 = 1 ; Remove from User PATH in "Uninstall"
+      SetOutPath "$INSTDIR"
+      DetailPrint "Create: uninst-user-path.txt"
+      FileOpen $0 "uninst-user-path.txt" "w"
+      FileWrite $0 "Added to User PATH: $INSTDIR\bin$\r$\n"
+      FileClose $0
+    ${EndIf}
+  SectionEnd
 
-  Push "$INSTDIR\bin"
-  Call AddToPath
- 
-SectionEnd
+  Section "Add install dir to System PATH" SYS_PATH_SECTION
+    Push "System"
+    Push "$INSTDIR\bin"
+    Call AddToPath
+    Pop $0
+    ${If} $0 = 1 ; Remove from System PATH in "Uninstall"
+      SetOutPath "$INSTDIR"
+      DetailPrint "Create: uninst-system-path.txt"
+      FileOpen $0 "uninst-system-path.txt" "w"
+      FileWrite $0 "Added to System PATH: $INSTDIR\bin$\r$\n"
+      FileClose $0
+    ${EndIf}
+  SectionEnd
+
+SectionGroupEnd
 
 SectionGroup "Add smartctl to drive menu"
 
@@ -432,6 +467,7 @@ SectionGroupEnd
 
 ;--------------------------------------------------------------------
 
+!ifndef IMPORT_UNINST
 Section "Uninstall"
   
   ; Stop & remove service
@@ -496,8 +532,10 @@ Section "Uninstall"
   Delete "$INSTDIR\doc\ChangeLog-7.0-7.5.txt" ; TODO: Remove after smartmontools 8.1
   Delete "$INSTDIR\doc\ChangeLog-6.0-7.0.txt" ; TODO: Remove after smartmontools 8.1
   Delete "$INSTDIR\doc\COPYING.txt"
-  Delete "$INSTDIR\doc\INSTALL.txt"
+  Delete "$INSTDIR\doc\INSTALL.md"
+  Delete "$INSTDIR\doc\INSTALL.txt" ; TODO: Remove after smartmontools 8.1
   Delete "$INSTDIR\doc\NEWS.txt" ; TODO: Remove after smartmontools 8.1
+  Delete "$INSTDIR\doc\README.md"
   Delete "$INSTDIR\doc\README.txt" ; TODO: Remove after smartmontools 8.1
   Delete "$INSTDIR\doc\TODO.txt" ; TODO: Remove after smartmontools 8.1
   Delete "$INSTDIR\doc\checksums*.txt"
@@ -510,6 +548,20 @@ Section "Uninstall"
   Delete "$INSTDIR\doc\smartd.conf.5.pdf"
   Delete "$INSTDIR\doc\old\NEWS-5.0-7.5.txt"
   Delete "$INSTDIR\uninst-smartmontools.exe"
+
+  ; Remove install dir from PATH only if added during install
+  ${If} ${FileExists} "$INSTDIR\uninst-user-path.txt"
+    Push "User"
+    Push "$INSTDIR\bin"
+    Call un.RemoveFromPath
+    Delete "$INSTDIR\uninst-user-path.txt"
+  ${EndIf}
+  ${If} ${FileExists} "$INSTDIR\uninst-system-path.txt"
+    Push "System"
+    Push "$INSTDIR\bin"
+    Call un.RemoveFromPath
+    Delete "$INSTDIR\uninst-system-path.txt"
+  ${EndIf}
 
   ; Remove shortcuts
   SetShellVarContext all
@@ -528,10 +580,6 @@ Section "Uninstall"
   RMDir  "$INSTDIR\doc"
   RMDir  "$INSTDIR"
 
-  ; Remove install dir from PATH
-  Push "$INSTDIR\bin"
-  Call un.RemoveFromPath
-
   ; Remove drive menu registry entries
   !insertmacro DriveMenuRemove
 
@@ -547,6 +595,7 @@ Section "Uninstall"
   ${EndIf}
 
 SectionEnd
+!endif ; IMPORT_UNINST
 
 ;--------------------------------------------------------------------
 ; Functions
@@ -572,15 +621,9 @@ Function .onInit
   ${EndIf}
 
 !ifdef INPDIR64
-  ; Check for 64-bit unless already installed in 32-bit location
-  ${If} $INSTDIR64 != ""
-  ${OrIf} $INSTDIR != "$PROGRAMFILES\smartmontools"
-    ; $1 = IsWow64Process(GetCurrentProcess(), ($0=FALSE, &$0))
-    System::Call "kernel32::GetCurrentProcess() i.s"
-    System::Call "kernel32::IsWow64Process(i s, *i 0 r0) i.r1"
-    ${If} "$0 $1" == "1 1" ; 64-bit Windows ?
-      !insertmacro SelectSection ${X64_SECTION}
-    ${EndIf}
+  ${If} $INSTDIR == "$PROGRAMFILES\smartmontools" ; Installed in 32-bit default location, ...
+  ${OrIfNot} ${RunningX64} ; ... or not running on 64-bit Windows, then ...
+    !insertmacro UnselectSection ${X64_SECTION} ; ... default to 32-bit version
   ${EndIf}
 
   ; Sizes of binary sections include 32-bit and 64-bit executables
@@ -683,7 +726,8 @@ Function ParseCmdLine
   !insertmacro CheckCmdLineOption "doc" ${DOC_SECTION}
   !insertmacro CheckCmdLineOption "uninst" ${UNINST_SECTION}
   !insertmacro CheckCmdLineOption "menu" ${MENU_SECTION}
-  !insertmacro CheckCmdLineOption "path" ${PATH_SECTION}
+  !insertmacro CheckCmdLineOption "path" ${USR_PATH_SECTION}
+  !insertmacro CheckCmdLineOption "syspath" ${SYS_PATH_SECTION}
   !insertmacro CheckCmdLineOption "driveremove" ${DRIVE_REMOVE_SECTION}
   !insertmacro CheckCmdLineOption "drive0" ${DRIVE_0_SECTION}
   !insertmacro CheckCmdLineOption "drive1" ${DRIVE_1_SECTION}
@@ -718,13 +762,13 @@ FunctionEnd
 !include "WinMessages.nsh"
 
 ; Registry Entry for environment
-; All users:
-;!define Environ 'HKLM "SYSTEM\CurrentControlSet\Control\Session Manager\Environment"'
-; Current user only:
-!define Environ 'HKCU "Environment"'
+; All users (HKLM):
+!define System_Environment 'SYSTEM\CurrentControlSet\Control\Session Manager\Environment'
+; Current user only (HKCU):
+!define User_Environment 'Environment'
 
 
-; AddToPath - Appends dir to PATH
+; AddToPath - Appends dir to User or System PATH
 ;
 ; Originally based on example from:
 ; https://nsis.sourceforge.io/Path_Manipulation
@@ -733,30 +777,36 @@ FunctionEnd
 ; https://nsis.sourceforge.io/AddToPath_safe
 ;
 ; Usage:
+;   Push "User" ; or "System"
 ;   Push "dir"
 ;   Call AddToPath
+;   Pop $0 ; $0 = 1 if PATH has been changed
 
 Function AddToPath
-  Exch $0
-  Push $1
-  Push $2
-  Push $3
-  Push $4
+  System::Store "S" ; push all registers onto a separate stack
+  Pop $0 ; $0 = "dir"
+  Pop $5 ; $5 = "User" or "System"
 
   ; NSIS ReadRegStr returns empty string on string overflow
   ; Native calls are used here to check actual length of PATH
+  ${If} $5 == "System"
+    ; $4 = RegOpenKey(HKEY_LOCAL_MACHINE, "SYSTEM\CurrentControlSet\Control\Session Manager\Environment", &$3)
+    System::Call "advapi32::RegOpenKey(i 0x80000002, t'${System_Environment}', *i.r3) i.r4"
+  ${Else}
+    ; $4 = RegOpenKey(HKEY_CURRENT_USER, "Environment", &$3)
+    System::Call "advapi32::RegOpenKey(i 0x80000001, t'${User_Environment}', *i.r3) i.r4"
+  ${EndIf}
 
-  ; $4 = RegOpenKey(HKEY_CURRENT_USER, "Environment", &$3)
-  System::Call "advapi32::RegOpenKey(i 0x80000001, t'Environment', *i.r3) i.r4"
+  StrCpy $6 0 ; retval = 0
   IntCmp $4 0 0 done done
-  ; $4 = RegQueryValueEx($3, "PATH", (DWORD*)0, (DWORD*)0, &$1, ($2=NSIS_MAX_STRLEN, &$2))
-  ; RegCloseKey($3)
-  System::Call "advapi32::RegQueryValueEx(i $3, t'PATH', i 0, i 0, t.r1, *i ${NSIS_MAX_STRLEN} r2) i.r4"
-  System::Call "advapi32::RegCloseKey(i $3)"
 
+  ; $4 = RegQueryValueEx($3, "Path", (DWORD*)0, (DWORD*)0, &$1, ($2=NSIS_MAX_STRLEN, &$2))
+  ; RegCloseKey($3)
+  System::Call "advapi32::RegQueryValueEx(i $3, t'Path', i 0, i 0, t.r1, *i ${NSIS_MAX_STRLEN} r2) i.r4"
+  System::Call "advapi32::RegCloseKey(i $3)"
   ${If} $4 = 234 ; ERROR_MORE_DATA
-    DetailPrint "AddToPath: original length $2 > ${NSIS_MAX_STRLEN}"
-    MessageBox MB_OK "PATH not updated, original length $2 > ${NSIS_MAX_STRLEN}" /SD IDOK
+    DetailPrint "AddToPath: original $5 PATH length $2 > ${NSIS_MAX_STRLEN}"
+    MessageBox MB_OK "$5 PATH not updated, original length $2 > ${NSIS_MAX_STRLEN}." /SD IDOK
     Goto done
   ${EndIf}
 
@@ -786,13 +836,14 @@ Function AddToPath
   IntOp $2 $2 + $3
   IntOp $2 $2 + 2 ; $2 = strlen(dir) + strlen(PATH) + sizeof(";")
   ${If} $2 > ${NSIS_MAX_STRLEN}
-    DetailPrint "AddToPath: new length $2 > ${NSIS_MAX_STRLEN}"
-    MessageBox MB_OK "PATH not updated, new length $2 > ${NSIS_MAX_STRLEN}." /SD IDOK
+    DetailPrint "AddToPath: new $5 PATH length $2 > ${NSIS_MAX_STRLEN}"
+    MessageBox MB_OK "$5 PATH not updated, new length $2 > ${NSIS_MAX_STRLEN}." /SD IDOK
     Goto done
   ${EndIf}
 
   ; Append dir to PATH
-  DetailPrint "Add to PATH: $0"
+  DetailPrint "Add to $5 PATH: $0"
+  DetailPrint "New length of $5 PATH: $2 (max ${NSIS_MAX_STRLEN})"
   StrCpy $2 $1 1 -1
   ${If} $2 == ";"
     StrCpy $1 $1 -1 ; remove trailing ';'
@@ -800,37 +851,48 @@ Function AddToPath
   ${If} $1 != "" ; no leading ';'
     StrCpy $0 "$1;$0"
   ${EndIf}
-  WriteRegExpandStr ${Environ} "PATH" $0
-  SendMessage ${HWND_BROADCAST} ${WM_WININICHANGE} 0 "STR:Environment" /TIMEOUT=5000
+
+  ${If} $5 == "System"
+    WriteRegExpandStr HKLM "${System_Environment}" "Path" $0
+    ${IfNotThen} ${Errors} ${|} StrCpy $6 1 ${|} ; retval = 1 on success
+  ${Else}
+    WriteRegExpandStr HKCU "${User_Environment}" "Path" $0
+    ${IfNotThen} ${Errors} ${|} StrCpy $6 1 ${|} ; retval = 1 on success
+  ${EndIf}
+
+  ${If} $6 = 1
+    SendMessage ${HWND_BROADCAST} ${WM_WININICHANGE} 0 "STR:Environment" /TIMEOUT=5000
+  ${EndIf}
 
 done:
-  Pop $4
-  Pop $3
-  Pop $2
-  Pop $1
-  Pop $0
+  Push $6 ; retval 0 or 1
+  System::Store "L" ; pop all registers from a separate stack
 FunctionEnd
 
-
-; RemoveFromPath - Removes dir from PATH
+!ifndef IMPORT_UNINST
+; RemoveFromPath - Removes dir from User or System PATH
 ;
 ; Based on example from:
 ; https://nsis.sourceforge.io/Path_Manipulation
 ;
 ; Usage:
+;   Push "User" ; or "System"
 ;   Push "dir"
 ;   Call RemoveFromPath
 
 Function un.RemoveFromPath
-  Exch $0
-  Push $1
-  Push $2
-  Push $3
-  Push $4
-  Push $5
-  Push $6
+  System::Store "S" ; push all registers onto a separate stack
+  Pop $0 ; $0 = "dir"
+  Pop $7 ; $7 = "User" or "System"
 
-  ReadRegStr $1 ${Environ} "PATH"
+  ${If} $7 == "System"
+    ReadRegStr $1 HKLM "${System_Environment}" "Path"
+    ${IfThen} ${Errors} ${|} Goto done ${|}
+  ${Else}
+    ReadRegStr $1 HKCU "${User_Environment}" "Path"
+    ${IfThen} ${Errors} ${|} Goto done ${|}
+  ${EndIf}
+
   StrCpy $5 $1 1 -1
   ${If} $5 != ";"
     StrCpy $1 "$1;" ; ensure trailing ';'
@@ -841,7 +903,7 @@ Function un.RemoveFromPath
   Pop $2 ; pos of our dir
   StrCmp $2 "" done
 
-  DetailPrint "Remove from PATH: $0"
+  DetailPrint "Remove from $7 PATH: $0"
   StrLen $3 "$0;"
   StrLen $4 $2
   StrCpy $5 $1 -$4 ; $5 is now the part before the path to remove
@@ -851,19 +913,19 @@ Function un.RemoveFromPath
   ${If} $5 == ";"
     StrCpy $3 $3 -1 ; remove trailing ';'
   ${EndIf}
-  WriteRegExpandStr ${Environ} "PATH" $3
+
+  ${If} $7 == "System"
+    WriteRegExpandStr HKLM "${System_Environment}" "Path" $3
+  ${Else}
+    WriteRegExpandStr HKCU "${User_Environment}" "Path" $3
+  ${EndIf}
+
   SendMessage ${HWND_BROADCAST} ${WM_WININICHANGE} 0 "STR:Environment" /TIMEOUT=5000
 
 done:
-  Pop $6
-  Pop $5
-  Pop $4
-  Pop $3
-  Pop $2
-  Pop $1
-  Pop $0
+  System::Store "L" ; pop all registers from a separate stack
 FunctionEnd
- 
+!endif ; IMPORT_UNINST
 
 ; StrStr - find substring in a string
 ;
@@ -903,8 +965,9 @@ Function ${un}StrStr
 FunctionEnd
 !macroend
 !insertmacro StrStr ""
-!insertmacro StrStr "un."
-
+!ifndef IMPORT_UNINST
+  !insertmacro StrStr "un."
+!endif
 
 ;--------------------------------------------------------------------
 ; Set Run As Administrator flag in shortcut
@@ -929,8 +992,8 @@ Function ShellLinkSetRunAs
   Goto +2
     SetOutPath "$INSTDIR"
 
-  System::Store S ; push $0-$9, $R0-$R9
-  pop $9
+  System::Store "S" ; push all registers onto a separate stack
+  Pop $9
   ; $0 = CoCreateInstance(CLSID_ShellLink, 0, CLSCTX_INPROC_SERVER, IID_IShellLink, &$1)
   System::Call "ole32::CoCreateInstance(g'${CLSID_ShellLink}',i0,i1,g'${IID_IShellLink}',*i.r1)i.r0"
   ${If} $0 = 0
@@ -959,5 +1022,5 @@ Function ShellLinkSetRunAs
   ${Else}
     DetailPrint "Set RunAsAdmin: $9"
   ${EndIf}
-  System::Store L ; pop $R9-$R0, $9-$0
+  System::Store "L" ; pop all registers from a separate stack
 FunctionEnd

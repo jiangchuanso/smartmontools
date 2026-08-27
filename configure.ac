@@ -33,14 +33,6 @@ AC_PROG_CXX
 AM_PROG_AS
 AC_PROG_INSTALL
 
-m4_pattern_forbid([^PKG_PROG_])
-if test "$cross_compiling" = "no"; then
-  # PKG_PROG_PKG_CONFIG from 'pkgconf' >= 2.3.0 aborts if 'pkg-config' is
-  # missing and the new 2nd parameter is not set
-  m4_ifdef([PKG_PROG_PKG_CONFIG], [PKG_PROG_PKG_CONFIG([], [PKG_CONFIG=])],
-    [AC_MSG_WARN([m4/pkg.m4 missing, systemd detection disabled])])
-fi
-
 AC_ARG_VAR(SOURCE_DATE_EPOCH, [Reproducible build timestamp])
 AC_ARG_VAR(OBJCOPY, [Object file copy command which supports '-D'])
 AC_ARG_VAR(WINDMC, [Windows message compiler command])
@@ -80,10 +72,14 @@ case "$host_os" in
 esac
 
 source_date_iso=
+dot_export="# export"
 if test -n "$SOURCE_DATE_EPOCH"; then
   # SOURCE_DATE_EPOCH must be either unset or numeric.
   test -z "`echo "$SOURCE_DATE_EPOCH" | sed -e 's,^$,X,' -e 's,[[0-9]],,g'`" \
   || AC_MSG_ERROR([Malformed SOURCE_DATE_EPOCH: '$SOURCE_DATE_EPOCH'])
+
+  AC_DEFINE_UNQUOTED(SOURCE_DATE_EPOCH, $SOURCE_DATE_EPOCH, [Reproducible build timestamp])
+
   # There are no portable 'date' or 'touch' options accepting SOURCE_DATE_EPOCH
   # (GNU: '-d @$SOURCE_DATE_EPOCH', BSD: '-r $SOURCE_DATE_EPOCH', POSIX: unsupported).
   # Try conversion to ISO format with GNU or BSD 'date'.  Use portable
@@ -94,9 +90,23 @@ if test -n "$SOURCE_DATE_EPOCH"; then
     cmd="unknown"
   done
   AC_MSG_RESULT([$cmd])
+
+  AC_MSG_CHECKING([how ${MAKE-make} exports environment variables])
+  dot_export=
+  #          GNU make BSD make
+  for exp in "export" ".export"; do
+    printf 'X=42\n%s X\nall:\n\ttest "$(X)" = "$$X"\n' "$exp" > conftest.make
+    if (unset X && ${MAKE-make} -f conftest.make >/dev/null 2>&1); then
+      dot_export=$exp; break
+    fi
+  done
+  rm -f conftest.make
+  AC_MSG_RESULT([${dot_export:-unknown}])
+  test -n "$dot_export" || dot_export="# unknown export"
 fi
 AC_SUBST([SOURCE_DATE_EPOCH])
 AC_SUBST([source_date_iso])
+AC_SUBST([dot_export])
 AM_CONDITIONAL(REPRODUCIBLE_BUILD, [test -n "$SOURCE_DATE_EPOCH"])
 
 # Checks for header files.
@@ -220,26 +230,28 @@ AC_SUBST([develbindir])
 AM_CONDITIONAL(INSTALL_DEVEL_BIN, [test -n "$develbindir"])
 
 objcopy_deterministic=false
-case "$with_devel:$enable_static:$SOURCE_DATE_EPOCH" in
-  yes:yes:?*)
-    # Use 'objcopy -D' to remove the timestamps from the static library
-    # because libtool offers no way to pass '-D' to 'ranlib'.
-    AC_CHECK_TOOL(OBJCOPY, [objcopy], [false])
-    AC_MSG_CHECKING([whether $OBJCOPY accepts -D])
-    objcopy_deterministic="$OBJCOPY -D"
-    res=yes
-    if ! (rm -f conftest.a && ${AR:-false} cr conftest.a \
-          && $objcopy_deterministic conftest.a) >/dev/null 2>&1; then
+case "$with_devel:$SOURCE_DATE_EPOCH" in
+  yes:?*)
+    # Use 'objcopy -D' to remove the timestamps from possible static and
+    # import libraries because libtool offers no way to pass '-D' to 'ranlib'.
+    AC_CHECK_TOOL(OBJCOPY, [objcopy], [])
+    if test -n "$OBJCOPY"; then
+      AC_MSG_CHECKING([whether $OBJCOPY accepts -D])
+      cmd="$OBJCOPY -D"; res=no
+      if (rm -f conftest.a && ${AR:-false} cr conftest.a && $cmd conftest.a) >/dev/null 2>&1; then
+        objcopy_deterministic=$cmd; res=yes
+      fi
+      rm -f conftest.a
+      AC_MSG_RESULT([$res])
+    fi
+    if test "$objcopy_deterministic" = "false"; then
       # Accept missing reproducibility if unsupported and warn below
-      objcopy_deterministic=": unsupported objcopy -D"
+      objcopy_deterministic=": unsupported ${OBJCOPY:-objcopy} -D"
       res=no
     fi
-    rm -f conftest.a
-    AC_MSG_RESULT([$res])
     ;;
 esac
 AC_SUBST([objcopy_deterministic])
-AM_CONDITIONAL(REPRODUCIBLE_BUILD_STATIC_LIB, [test "$objcopy_deterministic" != "false"])
 
 initddir=
 AC_ARG_WITH(initscriptdir,
@@ -364,6 +376,17 @@ AC_SUBST(attributelog)
 AC_SUBST(attributelogdir)
 AM_CONDITIONAL(ENABLE_ATTRIBUTELOG, [test -n "$attributelog"])
 
+jsonstate=
+AC_ARG_WITH(jsonstate,
+  [AS_HELP_STRING([--with-jsonstate@<:@=PREFIX|yes|no@:>@],
+    [Enable default smartd JSON state files [no] (yes=LOCALSTATEDIR/lib/smartmontools/smartd-json.)])],
+  [case "$withval" in yes) jsonstate='${localstatedir}/lib/${PACKAGE}/smartd-json.' ;;
+                      no) ;; *) jsonstate="$withval" ;; esac])
+jsonstatedir="${jsonstate%/*}"
+AC_SUBST(jsonstate)
+AC_SUBST(jsonstatedir)
+AM_CONDITIONAL(ENABLE_JSONSTATE, [test -n "$jsonstate"])
+
 AC_ARG_ENABLE(sample,
   [AS_HELP_STRING([--enable-sample], [Enables appending .sample to the installed smartd rc script and configuration file])],
   [smartd_suffix=; test "$enableval" = "yes" && smartd_suffix=".sample"],
@@ -394,8 +417,9 @@ AC_ARG_WITH(os-deps,
     done
   ],[])
 
+# TODO: Remove after smartmontools 8.1 (TBD)
 AC_ARG_WITH(selinux,
-  [AS_HELP_STRING([--with-selinux@<:@=yes|no@:>@], [Enables SELinux support [no]])],
+  [AS_HELP_STRING([--with-selinux@<:@=yes|no@:>@], [(deprecated)])],
   [ if test "$withval" = "yes"; then
       AC_CHECK_HEADERS([selinux/selinux.h], [], [AC_MSG_ERROR([Missing SELinux header files])])
       AC_CHECK_LIB(selinux, matchpathcon, [], [AC_MSG_ERROR([Missing or incorrect SELinux library files])])
@@ -437,32 +461,63 @@ case "$with_libsystemd:$host_os" in
 esac
 AC_SUBST(SYSTEMD_LDADD)
 
+running_systemd=no
+case "$host_os:$cross_compiling:$with_libsystemd:$use_libsystemd" in
+  linux*:no:auto:no)
+    AC_MSG_CHECKING([for the command running as PID 1])
+    # 'ps 1' without '-o comm' may print '/sbin/init' which may be a symlink to systemd
+    cmd=$(ps --no-headers -o comm 1 2>/dev/null | sed -n '1s/^\([[0-9A-Za-z]]*\)$/\1/p')
+    AC_MSG_RESULT([${cmd:-unknown}])
+    test "$cmd" != "systemd" || running_systemd=yes
+esac
+
+AC_ARG_WITH(smartd-service-file,
+  [AS_HELP_STRING([--with-smartd-service-file@<:@=DIR/FILE.service|auto|yes|no@:>@],
+    [Path of smartd systemd service file [auto] (yes=[/usr]/lib/systemd/system/smartd.service)])])
+smartd_service="smartd.service"
+
+# TODO: Remove after smartmontools 8.1
 AC_ARG_WITH(systemdsystemunitdir,
-  [AS_HELP_STRING([--with-systemdsystemunitdir@<:@=DIR|auto|yes|no@:>@], [Location of systemd service files [auto]])],
-  [], [with_systemdsystemunitdir=auto])
+  [AS_HELP_STRING([--with-systemdsystemunitdir@<:@=DIR|auto|yes|no@:>@], [(deprecated)])],
+  [ test -z "$with_smartd_service_file" ||
+      AC_MSG_ERROR(['--with-systemdsystemunitdir' cannot be used with '--with-smartd-service-file'])
+    case $withval in
+      auto|yes|no) with_smartd_service_file=$withval ;;
+      *) with_smartd_service_file="$withval/$smartd_service" ;;
+    esac
+  ],
+  [test -n "$with_smartd_service_file" || with_smartd_service_file=auto])
 
 systemdsystemunitdir=
-case "$with_systemdsystemunitdir:$use_libsystemd" in
-  auto:yes|yes:yes)
-    if test -n "$PKG_CONFIG"; then
-      AC_MSG_CHECKING([for systemdsystemunitdir])
-      systemdsystemunitdir=`$PKG_CONFIG --variable=systemdsystemunitdir systemd 2>/dev/null`
-      AC_MSG_RESULT([${systemdsystemunitdir:-no}])
-    fi
-    case "$with_systemdsystemunitdir:$sysconfdir:$systemdsystemunitdir" in
+case "$with_smartd_service_file:$cross_compiling:$running_systemd:$use_libsystemd" in
+  auto:no:*yes*|yes:*)
+    AC_MSG_CHECKING([for systemdsystemunitdir])
+    # Start with '/usr/...' because '/lib' may be only a symlink to '/usr/lib'
+    for dir in /usr/lib/systemd/system /lib/systemd/system; do
+      if test -d $dir; then
+        systemdsystemunitdir=$dir
+        break
+      fi
+    done
+    AC_MSG_RESULT([${systemdsystemunitdir:-no}])
+    case "$with_smartd_service_file:$sysconfdir:$systemdsystemunitdir" in
       yes:*:) AC_MSG_ERROR([Location of systemd service files not found]) ;;
       yes:*:*|auto:*:|auto:/etc:*) ;;
-      *) systemdsystemunitdir='${prefix}'$systemdsystemunitdir ;;
+      *) systemdsystemunitdir='${prefix}'"${systemdsystemunitdir#/usr}" ;;
     esac ;;
   auto:*|no:*) ;;
-  *:yes) systemdsystemunitdir="$with_systemdsystemunitdir" ;;
-  *) AC_MSG_ERROR(['--with-systemdsystemunitdir=$with_systemdsystemunitdir' now requires '--with-libsystemd']) ;;
+  /?*/?*.service:*:*:*)
+    systemdsystemunitdir=${with_smartd_service_file%/*}
+    smartd_service=${with_smartd_service_file##*/} ;;
+  *) AC_MSG_ERROR([Invalid path for systemd service file: '$with_smartd_service_file']) ;;
 esac
 AC_SUBST(systemdsystemunitdir)
+AC_SUBST(smartd_service)
 AM_CONDITIONAL(INSTALL_SYSTEMDUNIT, [test -n "$systemdsystemunitdir"])
 
 AC_ARG_WITH(systemdenvfile,
-  [AS_HELP_STRING([--with-systemdenvfile@<:@=FILE|auto|yes|no@:>@], [Path of systemd EnvironmentFile [auto]])],
+  [AS_HELP_STRING([--with-systemdenvfile@<:@=DIR/FILE|auto|yes|no@:>@],
+    [Path of systemd EnvironmentFile [auto] (yes=SYSCONFDIR/[default|sysconfig]/smartmontools)])],
   [], [with_systemdenvfile=auto])
 
 systemdenvfile=
@@ -485,17 +540,12 @@ case "$with_systemdenvfile:$cross_compiling:$systemdsystemunitdir" in
 esac
 AC_SUBST(systemdenvfile)
 
-# TODO: Remove when NVMe support is no longer EXPERIMENTAL
+# TODO: Remove after smartmontools 8.1
 AC_ARG_WITH(nvme-devicescan,
-  [AS_HELP_STRING([--with-nvme-devicescan@<:@=yes|no@:>@],
-    [Include NVMe devices in smartctl --scan and smartd DEVICESCAN [yes]])])
-
-# TODO: Remove after smartmontools 7.5
-AC_ARG_WITH(signal-func,
-  [AS_HELP_STRING([--with-signal-func], [(removed)])],
-  [AC_MSG_ERROR([
-The option '--with-signal-func' is no longer supported.  If this option is
-still needed, please inform $PACKAGE_BUGREPORT.
+  [AS_HELP_STRING([--with-nvme-devicescan], [(removed)])],
+  [test "$withval" != "no" || AC_MSG_ERROR([
+The option '--without-nvme-devicescan' is no longer supported.
+NVMe device scanning is now always enabled if supported.
 ])])
 
 AC_ARG_WITH(cxx11-option,
@@ -525,17 +575,21 @@ cxx_missing=
 case "$with_cxx11_option" in
   no) ;;
   auto)
-    check_cxx_options "C++17" 201703 999999 "-std=gnu++17 -std=gnu++1z -std=c++17 -std=c++1z"
+    check_cxx_options "C++20"               202002 999999 "-std=gnu++20 -std=gnu++2a -std=c++20 -std=c++2a"
+    cxx20_option=$res;
+    check_cxx_options "C++17 but not C++20" 201703 202002 "-std=gnu++17 -std=gnu++1z -std=c++17 -std=c++1z"
     cxx17_option=$res;
     check_cxx_options "C++14 but not C++17" 201402 201703 "-std=gnu++14 -std=gnu++1y -std=c++14 -std=c++1y"
     cxx14_option=$res;
-    case "$cxx17_option:$cxx14_option" in
-      unknown:unknown) cxx_missing=14 ;;
-      unknown:*)       cxx_missing=17 ;;
+    case "$cxx20_option:$cxx17_option:$cxx14_option" in
+      unknown:unknown:unknown) cxx_missing=14 ;;
+      unknown:unknown:*)       cxx_missing=17 ;;
+      unknown:*)               cxx_missing=20 ;;
     esac
     check_cxx_options "C++11 but not C++14" 201103 201402 "-std=gnu++11 -std=gnu++0x -std=c++11 -std=c++0x"
     test "$res" != "unknown" || res=$cxx14_option
     test "$res" != "unknown" || res=$cxx17_option
+    test "$res" != "unknown" || res=$cxx20_option
     test "$res" != "unknown" || AC_MSG_ERROR([
 This script was unable to determine a compiler option to accept C++11.
 Use option '--with-cxx11-option=OPTION' to specify a compiler option.
@@ -647,6 +701,13 @@ else
 fi
 AM_CONDITIONAL(NEED_REGEX, [test "$need_regex" = "yes"])
 
+troff_cw_font=CW
+AC_ARG_WITH(troff-cw-font,
+  [AS_HELP_STRING([--with-troff-cw-font@<:@=FONT|CR|yes|no@:>@],
+    [Monospace (Constant Width) font for man page formatting with troff [CW] (yes=CW, no=R)])],
+  [ case "$withval" in yes) ;; no) troff_cw_font=R ;; *) troff_cw_font=$withval ;; esac ])
+AC_SUBST(troff_cw_font)
+
 # Set platform-specific modules and symbols
 os_libs=
 os_dltools='curl wget lynx'
@@ -660,16 +721,15 @@ os_solaris=no
 os_win32=no
 os_win32_mingw=no
 os_win64=no
+os_os2=no
 os_man_filter=
-os_nvme_devicescan=
-os_nvme_devicescan_changed=no
+os_unmaintained=
 case "${host}" in
   *-*-linux*)
     os_deps='os_linux.lo cciss.lo dev_areca.lo'
     os_dnsdomainname="'dnsdomainname' 'hostname -d'"
     os_nisdomainname="'nisdomainname' 'hostname -y' 'domainname'"
     os_man_filter=Linux
-    os_nvme_devicescan=yes
     ;;
   *-*-freebsd*|*-*-dragonfly*|*-*-kfreebsd*-gnu*|*-*-midnightbsd*)
     os_deps='os_freebsd.lo cciss.lo dev_areca.lo'
@@ -677,7 +737,6 @@ case "${host}" in
     os_dltools='fetch curl wget lynx'
     AC_CHECK_LIB(usb, libusb20_dev_get_device_desc)
     os_man_filter=FreeBSD
-    os_nvme_devicescan=yes
     ;;
   *-*-solaris*)
     os_deps='os_solaris.lo dev_legacy.lo' # TODO: migrate to new interface
@@ -689,9 +748,6 @@ case "${host}" in
     os_deps='os_netbsd.lo'
     os_libs='-lutil'
     os_man_filter=NetBSD
-    os_nvme_devicescan=yes
-    # TODO: Remove after smartmontools 7.5
-    os_nvme_devicescan_changed=yes
     ;;
   *-*-openbsd*)
     os_deps='os_openbsd.lo'
@@ -708,7 +764,6 @@ case "${host}" in
     os_nisdomainname=
     os_win32=yes
     os_man_filter=Cygwin
-    os_nvme_devicescan=yes
     ;;
   x86_64-*-mingw*)
     os_deps='os_win32.lo dev_areca.lo'
@@ -721,7 +776,6 @@ case "${host}" in
     os_win32_mingw=yes
     os_win64=yes
     os_man_filter=Windows
-    os_nvme_devicescan=yes
     ;;
   *-*-mingw*)
     os_deps='os_win32.lo dev_areca.lo'
@@ -730,21 +784,21 @@ case "${host}" in
     os_win32=yes
     os_win32_mingw=yes
     os_man_filter=Windows
-    os_nvme_devicescan=yes
     ;;
   *-*-darwin*)
     os_deps='os_darwin.lo'
     os_libs='-framework CoreFoundation -framework IOKit'
     os_darwin=yes
     os_man_filter=Darwin
-    os_nvme_devicescan=yes
     ;;
   *-*-nto-qnx*)
     os_deps='os_qnxnto.lo dev_legacy.lo' # TODO: migrate to new interface
+    os_unmaintained='QNX'
     ;;
   *-*-os2-*)
     os_deps='os_os2.lo dev_legacy.lo' # TODO: migrate to new interface
     os_posix=no
+    os_os2=yes
     ;;
   *)
     os_deps='os_generic.lo'
@@ -754,29 +808,11 @@ esac
 # Replace if '--with-os-deps' was specified
 test -z "$with_os_deps" || os_deps="$with_os_deps"
 
-# Define 'OLD_INTERFACE' if 'dev_legacy.cpp' is still required
-case " $os_deps " in *\ dev_legacy.lo\ *)
-  AC_DEFINE(OLD_INTERFACE, 1, [Define to 1 if os_*.cpp still uses the old interface]) ;;
-esac
-
 AC_MSG_CHECKING([whether the OS provides a POSIX API])
 if test "$os_posix" = "yes"; then
   AC_DEFINE(HAVE_POSIX_API, 1, [Define to 1 if the OS provides a POSIX API])
 fi
 AC_MSG_RESULT([$os_posix])
-
-# TODO: Remove when NVMe support is no longer EXPERIMENTAL
-case "$os_nvme_devicescan:${with_nvme_devicescan+set}" in
-  no:|yes:)
-    AC_MSG_CHECKING([whether NVMe device scanning could be safely enabled])
-    with_nvme_devicescan=$os_nvme_devicescan
-    AC_MSG_RESULT([$os_nvme_devicescan])
-    os_nvme_devicescan=used ;;
-esac
-AC_SUBST(with_nvme_devicescan)
-if test "$with_nvme_devicescan" = "yes"; then
-  AC_DEFINE(WITH_NVME_DEVICESCAN, 1, [Define to 1 to include NVMe devices in smartd DEVICESCAN.])
-fi
 
 AC_SUBST([os_deps])
 AC_SUBST([os_libs])
@@ -799,6 +835,7 @@ AM_CONDITIONAL(OS_SOLARIS, [test "$os_solaris" = "yes"])
 AM_CONDITIONAL(OS_WIN32, [test "$os_win32" = "yes"])
 AM_CONDITIONAL(OS_WIN32_MINGW, [test "$os_win32_mingw" = "yes"])
 AM_CONDITIONAL(OS_WIN64, [test "$os_win64" = "yes"])
+AM_CONDITIONAL(OS_OS2, [test "$os_os2" = "yes"])
 
 if test "$GXX" = "yes"; then
   orig_CXXFLAGS=$CXXFLAGS
@@ -963,8 +1000,8 @@ AC_CONFIG_FILES([
   Makefile
   include/Makefile
   lib/Makefile
-  lib/examples/Makefile
   src/Makefile
+  src/examples/Makefile
 ])
 AC_OUTPUT
 AC_PROG_MAKE_SET
@@ -991,6 +1028,7 @@ info=`
   else
     echo "Reproducible build:     [[disabled]]"
   fi
+  echo "Monospace font (troff): $troff_cw_font"
 
   case "$host_os" in
     mingw*)
@@ -1013,7 +1051,9 @@ info=`
       if test -n "$attributelog"; then
         echo "smartd attribute logs:  \`eval eval eval echo $attributelog\`MODEL-SERIAL.TYPE.csv"
       fi
-      echo "NVMe DEVICESCAN:        ${with_nvme_devicescan-no}"
+      if test -n "$jsonstate"; then
+        echo "smartd JSON state:      \`eval eval eval echo $jsonstate\`MODEL-SERIAL.TYPE.json"
+      fi
       ;;
 
     *)
@@ -1068,7 +1108,7 @@ info=`
         echo "smartd initd script:    [[disabled]]"
       fi
       if test -n "$systemdsystemunitdir"; then
-        echo "smartd service file:    \`eval eval eval echo $systemdsystemunitdir\`/smartd.service"
+        echo "smartd service file:    \`eval eval eval echo $systemdsystemunitdir/$smartd_service\`"
         if test -n "$systemdenvfile"; then
           echo "smartd environ file:    \`eval eval eval echo $systemdenvfile\`"
         else
@@ -1085,13 +1125,17 @@ info=`
       else
         echo "smartd attribute logs:  [[disabled]]"
       fi
+      if test -n "$jsonstate"; then
+        echo "smartd JSON state:      \`eval eval eval echo $jsonstate\`MODEL-SERIAL.TYPE.json"
+      else
+        echo "smartd JSON state:      [[disabled]]"
+      fi
       case "$host_os" in
         linux*)
           echo "SELinux support:        ${with_selinux-no}"
           echo "libcap-ng support:      $use_libcap_ng"
           echo "systemd notify support: $use_libsystemd" ;;
       esac
-      echo "NVMe DEVICESCAN:        ${with_nvme_devicescan-[[not implemented]]}"
       ;;
   esac
   echo "-----------------------------------------------------------------------------"
@@ -1101,38 +1145,18 @@ AC_MSG_NOTICE([
 $info
 ])
 
-# TODO: Remove when NVMe support is no longer EXPERIMENTAL
-case "$os_nvme_devicescan:$with_nvme_devicescan:$os_nvme_devicescan_changed" in
-  used:yes:yes) AC_MSG_WARN([
-The default for the inclusion of NVME devices in smartd.conf
-'DEVICESCAN' and 'smartctl --scan' has been changed to 'yes' on
-this platform.
-Use option '--with-nvme-devicescan' to suppress this warning.
-])  ;;
-  used:no:*) AC_MSG_WARN([
-This version of smartmontools provides NVMe support which is still
-EXPERIMENTAL.  NVMe devices are not yet included in smartd.conf
-'DEVICESCAN' and 'smartctl --scan' unless '-d nvme' is specified.
-Use option '--with-nvme-devicescan' to include NVMe devices.
-Use option '--without-nvme-devicescan' to suppress this warning.
-])  ;;
-  yes:no:*) AC_MSG_WARN([
-The default for the inclusion of NVME devices in smartd.conf
-'DEVICESCAN' and 'smartctl --scan' is 'yes' on this platform.
-If option '--without-nvme-devicescan' is still needed, please inform
-$PACKAGE_BUGREPORT - Thanks!
-])  ;;
-esac
+# TODO: Remove after smartmontools 8.1
+test -z "$with_nvme_devicescan" || AC_MSG_WARN([
+The option '--with-nvme-devicescan' is no longer required.
+NVMe device scanning is now always enabled if supported.
+])
 
-case "$host_os:$with_libsystemd:$use_libsystemd:$PKG_CONFIG" in
-  linux*:auto:no:?*)
-    if $PKG_CONFIG systemd >/dev/null 2>&1; then
-      AC_MSG_WARN([
+case "$running_systemd:$with_libsystemd:$use_libsystemd" in
+  yes:auto:no) AC_MSG_WARN([
 systemd(1) is used on this system but smartd systemd notify support will
 not be available because a required library is missing.
 Use option '--without-libsystemd' to suppress this warning.
-])
-    fi ;;
+]) ;;
 esac
 
 case "$host_os:$WINDMC" in
@@ -1144,7 +1168,7 @@ of smartd log messages in the Windows event log.
 esac
 
 test -z "$cxx_missing" || AC_MSG_WARN([
-This version of smartmontools does not use C++14 or C++17 enhancements,
+This version of smartmontools does not use C++14, C++17 or C++20 enhancements,
 but future versions possibly will.
 This script was unable to determine a compiler option to enable C++$cxx_missing.
 Please send info about compiler and platform to
@@ -1153,8 +1177,16 @@ $PACKAGE_BUGREPORT - Thanks!
 
 case $objcopy_deterministic in
   :*) AC_MSG_WARN([
-The installed static library will not be reproducible because 'objcopy -D'
-is not available.
+Installed static and import libraries will not be reproducible because
+'${OBJCOPY:-objcopy} -D' is not available.
+]) ;;
+esac
+
+case $dot_export in
+  *unknown*) AC_MSG_WARN([
+This script was unable to determine how '${MAKE-make}' exports environment variables.
+Use 'export SOURCE_DATE_EPOCH=$SOURCE_DATE_EPOCH' before running '${MAKE-make}'.
+Please inform $PACKAGE_BUGREPORT - Thanks!
 ]) ;;
 esac
 
@@ -1171,4 +1203,22 @@ esac
 # TODO: Remove after smartmontools 8.1
 test -z "$with_exampledir" || AC_MSG_WARN([
 Option '--with-exampledir' is deprecated, use '--with-smartd-scripts' instead.
+])
+
+# TODO: Remove after smartmontools 8.1
+test -z "$with_systemdsystemunitdir" || AC_MSG_WARN([
+Option '--with-systemdsystemunitdir' is deprecated, use '--with-smartd-service-file' instead.
+])
+
+# TODO: Remove after smartmontools 8.1 (TBD)
+test "$with_selinux" != "yes" || AC_MSG_WARN([
+Option '--with-selinux' is deprecated and may be removed in a future version
+of smartmontools.  It only affects the creation of missing /dev nodes for
+very old 3ware controllers.  If you still need this option, please inform
+$PACKAGE_BUGREPORT - Thanks!
+])
+
+test -z "$os_unmaintained" || AC_MSG_WARN([
+The $os_unmaintained port of smartmontools is unmaintained.  Please report the test
+results to $PACKAGE_BUGREPORT - Thanks!
 ])

@@ -82,7 +82,7 @@ scsi_device::query_cmd_support()
     bool res = true;
     int k, err, cd_len, bump;
     int r_len = 0;
-    uint8_t * rp = (uint8_t *)calloc(sizeof(uint8_t), RSOC_RESP_SZ);
+    uint8_t * rp = (uint8_t *)calloc(RSOC_RESP_SZ, sizeof(uint8_t));
     const uint8_t * last_rp;
     uint8_t * cmdp;
     static const int max_bytes_of_cmds = RSOC_RESP_SZ - 4;
@@ -1273,7 +1273,8 @@ try_again:
     /* Guard against devices that ignore EVPD bit and do standard INQUIRY */
     if (bufLen > 1) {
         if (vpd_page == pBuf[1]) {
-            if ((0x80 == vpd_page) && (bufLen > 2) && (0x0 != pBuf[2]))
+            if ((SCSI_VPD_UNIT_SERIAL_NUMBER /* 0x80 */ == vpd_page) &&
+                (bufLen > 2) && (0x0 != pBuf[2]))
                 return SIMPLE_ERR_BAD_RESP;
         } else
             return SIMPLE_ERR_BAD_RESP;

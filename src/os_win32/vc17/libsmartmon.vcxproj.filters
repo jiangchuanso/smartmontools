@@ -78,6 +78,7 @@
     <ClCompile Include="..\..\..\lib\os_qnxnto.cpp" />
     <ClCompile Include="..\..\..\lib\os_qnxnto.h" />
     <ClCompile Include="..\..\..\lib\os_solaris.cpp" />
+    <ClCompile Include="..\..\..\lib\hexdump.cpp" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="..\..\..\lib\regex\regex_internal.h">
@@ -152,8 +153,14 @@
     <ClInclude Include="..\..\..\include\smartmon\nvme.h">
       <Filter>include_smartmon</Filter>
     </ClInclude>
+    <ClInclude Include="..\..\..\include\smartmon\hexdump.h">
+      <Filter>include_smartmon</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
+    <None Include="..\..\..\include\Makefile.am">
+      <Filter>include_smartmon</Filter>
+    </None>
     <None Include="..\..\..\include\smartmon\config.h.in" />
     <None Include="..\..\..\lib\Makefile.am" />
   </ItemGroup>

@@ -3,7 +3,7 @@
  *
  * Home page of code is: https://www.smartmontools.org
  *
- * Copyright (C) 2016-25 Christian Franke
+ * Copyright (C) 2016-26 Christian Franke
  *
  * SPDX-License-Identifier: GPL-2.0-or-later
  */
@@ -546,15 +546,23 @@ static void print_smart_log(const nvme_smart_log & smart_log,
         jref["temperature_sensors"][i] = k - 273;
     }
   }
-  if (show_all || smart_log.thm_temp1_trans_count)
-    pout("Thermal Temp. 1 Transition Count:   %d\n", smart_log.thm_temp1_trans_count);
-  if (show_all || smart_log.thm_temp2_trans_count)
-    pout("Thermal Temp. 2 Transition Count:   %d\n", smart_log.thm_temp2_trans_count);
-  if (show_all || smart_log.thm_temp1_total_time)
-    pout("Thermal Temp. 1 Total Time:         %d\n", smart_log.thm_temp1_total_time);
-  if (show_all || smart_log.thm_temp2_total_time)
-    pout("Thermal Temp. 2 Total Time:         %d\n", smart_log.thm_temp2_total_time);
-  pout("\n");
+
+  // Thermal management values are optional (NVMe 1.3)
+  if (   show_all
+      || smart_log.thm_temp1_trans_count || smart_log.thm_temp1_total_time
+      || smart_log.thm_temp2_trans_count || smart_log.thm_temp2_total_time) {
+    jout("Thermal Temp. 1 Transition Count:   %d\n", smart_log.thm_temp1_trans_count);
+    jout("Thermal Temp. 1 Total Time:         %d\n", smart_log.thm_temp1_total_time);
+    jout("Thermal Temp. 2 Transition Count:   %d\n", smart_log.thm_temp2_trans_count);
+    jout("Thermal Temp. 2 Total Time:         %d\n", smart_log.thm_temp2_total_time);
+    jref += {
+      { "thermal_mgmt_temperature_1_transition_count", smart_log.thm_temp1_trans_count },
+      { "thermal_mgmt_temperature_1_total_time", smart_log.thm_temp1_total_time },
+      { "thermal_mgmt_temperature_2_transition_count", smart_log.thm_temp2_trans_count },
+      { "thermal_mgmt_temperature_2_total_time", smart_log.thm_temp2_total_time }
+    };
+  }
+  jout("\n");
 }
 
 static void print_error_log(const nvme_error_log_page * error_log,
@@ -790,7 +798,11 @@ int nvmePrintMain(nvme_device * device, const nvme_print_options & options)
     unsigned nsid = device->get_nsid();
     if (nsid == nvme_broadcast_nsid) {
       // Broadcast namespace
-      if (id_ctrl.nn == 1) {
+      if (!id_ctrl.nn) {
+        // No namespaces, don't print namespace information
+        nsid = 0;
+      }
+      else if (id_ctrl.nn == 1) {
         // No namespace management, get size from single namespace
         nsid = 1;
         if (!nvme_read_id_ns(device, nsid, id_ns))
@@ -846,25 +858,33 @@ int nvmePrintMain(nvme_device * device, const nvme_print_options & options)
 
   // Print Error Information Log
   if (options.error_log_entries) {
-    unsigned max_entries = id_ctrl.elpe + 1; // 0's based value
-    unsigned want_entries = options.error_log_entries;
-    if (want_entries > max_entries)
-      want_entries = max_entries;
-    raw_buffer error_log_buf(want_entries * sizeof(nvme_error_log_page));
-    nvme_error_log_page * error_log =
-      reinterpret_cast<nvme_error_log_page *>(error_log_buf.data());
+    // Assume missing log if only one entry is reported (id_ctrl.elpe = 0).
+    // This log is mandatory but some devices which emulate NVMe SMART/Health
+    // Information do not provide it.
+    if (!(id_ctrl.elpe || options.error_log_entries == 1))
+      pout("Error Information (NVMe Log 0x01) not supported"
+           " (guessed, override with '-l error,1')\n\n");
+    else {
+      unsigned max_entries = id_ctrl.elpe + 1; // 0's based value
+      unsigned want_entries = options.error_log_entries;
+      if (want_entries > max_entries)
+        want_entries = max_entries;
+      raw_buffer error_log_buf(want_entries * sizeof(nvme_error_log_page));
+      nvme_error_log_page * error_log =
+        reinterpret_cast<nvme_error_log_page *>(error_log_buf.data());
 
-    unsigned read_entries = nvme_read_error_log(device, error_log, want_entries, lpo_sup);
-    if (!read_entries) {
-      jerr("Read %u entries from Error Information Log failed: %s\n\n",
-           want_entries, device->get_errmsg());
-      return retval | FAILSMART;
+      unsigned read_entries = nvme_read_error_log(device, error_log, want_entries, lpo_sup);
+      if (!read_entries) {
+        jerr("Read %u entries from Error Information Log failed: %s\n\n",
+             want_entries, device->get_errmsg());
+        return retval | FAILSMART;
+      }
+      if (read_entries < want_entries)
+        jerr("Read Error Information Log failed, %u entries missing: %s\n",
+             want_entries - read_entries, device->get_errmsg());
+
+      print_error_log(error_log, read_entries, max_entries);
     }
-    if (read_entries < want_entries)
-      jerr("Read Error Information Log failed, %u entries missing: %s\n",
-           want_entries - read_entries, device->get_errmsg());
-
-    print_error_log(error_log, read_entries, max_entries);
   }
 
   // Check for self-test support
