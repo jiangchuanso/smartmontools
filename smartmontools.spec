@@ -67,6 +67,11 @@ glibc and are guaranteed runtime-compatible with el8 systems.
 
 %install
 %make_install
+# smartd_warning.sh runs plugin scripts from smartd_warning.d (default
+# --with-smartdplugindir = %{_sysconfdir}/smartd_warning.d). 'make install'
+# does not create this directory, but the upstream 'bin-dist' layout ships
+# it as an (empty) drop-in dir, so create it here for parity.
+mkdir -p %{buildroot}%{_sysconfdir}/smartd_warning.d
 
 %files
 %license %{_docdir}/smartmontools/COPYING
@@ -82,6 +87,8 @@ glibc and are guaranteed runtime-compatible with el8 systems.
 %{_sbindir}/update-smart-drivedb
 %config(noreplace) %{_sysconfdir}/smartd.conf
 %config(noreplace) %{_sysconfdir}/smartd_warning.sh
+# Drop-in directory for smartd_warning.sh plugin scripts (see bin-dist layout).
+%dir %{_sysconfdir}/smartd_warning.d
 %{_datadir}/smartmontools/drivedb.h
 %{_mandir}/man8/smartctl.8*
 %{_mandir}/man8/smartd.8*
