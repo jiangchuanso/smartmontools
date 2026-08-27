@@ -89,10 +89,11 @@ cat > %{buildroot}%{_sysconfdir}/smartd_warning.d/smart_curl_mail <<'SMART_CURL_
 # SPDX-License-Identifier: GPL-2.0-or-later
 #
 # === Usage ===
-# In /etc/smartd.conf add the plugin name (with a leading '@') to the -m
-# option and use /etc/smartd_warning.sh as the exec script, e.g.:
+# In /etc/smartd.conf add the plugin name (with a leading '@') to the
+# comma-separated -m address list and use /etc/smartd_warning.sh as the exec
+# script, e.g.:
 #
-#   -m @smart_curl_mail admin@example.com -M exec /etc/smartd_warning.sh
+#   -m @smart_curl_mail,admin@example.com -M exec /etc/smartd_warning.sh
 #
 # The plugin is started by /etc/smartd_warning.sh and reads the message from
 # the environment variables SMARTD_ADDRESS, SMARTD_SUBJECT and
@@ -129,7 +130,11 @@ if [ -r /etc/smartd_warning.d/smart_curl_mail.conf ]; then
   . /etc/smartd_warning.d/smart_curl_mail.conf
 fi
 
-# Nothing to do without recipients
+# Basic sanity checks
+if [ -z "$SMARTD_SMTP_URL" ] || [ -z "$SMARTD_MAIL_FROM" ]; then
+  echo "$0: SMARTD_SMTP_URL and SMARTD_MAIL_FROM must not be empty" >&2
+  exit 1
+fi
 if [ -z "$SMARTD_ADDRESS" ]; then
   echo "$0: SMARTD_ADDRESS is empty - no recipients" >&2
   exit 1
@@ -158,13 +163,13 @@ trap 'rm -f "$tmp"' EXIT HUP INT TERM
   for a in $SMARTD_ADDRESS; do
     printf 'To: <%%s>\n' "$a"
   done
-  printf 'Subject: %%s\n' "$(rfc2047 "${SMARTD_SUBJECT-SMART error detected}")"
-  printf 'Date: %%s\n' "$(date -R 2>/dev/null)"
+  printf 'Subject: %%s\n' "$(rfc2047 "${SMARTD_SUBJECT:-SMART error detected}")"
+  printf 'Date: %%s\n' "$(date -R 2>/dev/null || date 2>/dev/null)"
   printf 'MIME-Version: 1.0\n'
   printf 'Content-Type: text/plain; charset=UTF-8\n'
   printf 'Content-Transfer-Encoding: 8bit\n'
   printf '\n'
-  printf '%%s\n' "${SMARTD_FULLMESSAGE-Smartd warning message}"
+  printf '%%s\n' "${SMARTD_FULLMESSAGE:-Smartd warning message}"
 } > "$tmp"
 
 # Assemble curl command line (POSIX sh, no arrays needed)
@@ -206,7 +211,10 @@ cat > %{buildroot}%{_sysconfdir}/smartd_warning.d/smart_curl_mail.conf <<'SMART_
 # Envelope and RFC 5322 'From:' address
 #SMARTD_MAIL_FROM='smartd@localhost'
 
-# SMTP AUTH (LOGIN/PLAIN) credentials - empty disables AUTH
+# SMTP AUTH (LOGIN/PLAIN) credentials - empty disables AUTH.
+# NOTE: this file may contain a plaintext password.  If you set the AUTH
+# variables here, restrict access to root only:
+#   chmod 600 /etc/smartd_warning.d/smart_curl_mail.conf
 #SMARTD_SMTP_AUTH_USER=
 #SMARTD_SMTP_AUTH_PASS=
 
