@@ -6,8 +6,12 @@ name: Build CentOS 8 RPMs (smartmontools)
 # so it links against the CentOS 8 glibc and is guaranteed runtime-compatible.
 #
 # Trigger:
-#   - 'release: created' -> fired by build.yml when it publishes its release;
-#     the RPMs are attached to that very release automatically.
+#   - 'release: released' -> fired when a prerelease is promoted to a full
+#     release (e.g. build.yml creates a --prerelease, then it is promoted via
+#     the UI or `gh release edit --prerelease=false`). The RPMs are attached to
+#     that very release at promotion time.
+#   - 'release: published' -> covers the case where build.yml creates a full
+#     (non-prerelease) release directly.
 #   - Manual run via workflow_dispatch (RPMs are built and attached to the
 #     matching release if one exists, otherwise only uploaded as artifacts).
 #
@@ -25,7 +29,7 @@ name: Build CentOS 8 RPMs (smartmontools)
 
 on:
   release:
-    types: [created]
+    types: [released, published]
   workflow_dispatch:
 
 permissions:
