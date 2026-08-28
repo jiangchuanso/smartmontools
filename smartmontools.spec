@@ -77,9 +77,9 @@ glibc and are guaranteed runtime-compatible with el8 systems.
 mkdir -p %{buildroot}%{_sysconfdir}/smartd_warning.d
 
 # smartd_warning.d plugin: send smartd alert emails directly via SMTP with
-# curl(1).  No local MTA is required.  Default: plain SMTP on port 25,
-# no encryption, no authentication.  SMTPS/STARTTLS/AUTH examples are given
-# in the script comments and in the smart_curl_mail.conf template.
+# curl(1).  No local MTA is required.  The plugin itself has no built-in SMTP
+# configuration - all settings (SMTP URL, From, AUTH, curl options) live in
+# smart_curl_mail.conf, which is required and read at runtime.
 cat > %{buildroot}%{_sysconfdir}/smartd_warning.d/smart_curl_mail <<'SMART_CURL_MAIL_EOF'
 #!/bin/sh
 #
@@ -100,11 +100,12 @@ cat > %{buildroot}%{_sysconfdir}/smartd_warning.d/smart_curl_mail <<'SMART_CURL_
 # SMARTD_FULLMESSAGE (see 'man smartd.conf' / 'man smartd_warning.sh').
 #
 # === Configuration ===
-# Defaults below: plain SMTP to localhost:25, no encryption, no AUTH.
-# Every variable may be overridden in
-# /etc/smartd_warning.d/smart_curl_mail.conf (same variable names).
+# The plugin keeps NO SMTP configuration of its own.  All settings are read
+# from /etc/smartd_warning.d/smart_curl_mail.conf (see the template shipped
+# alongside this script).  The .conf file is required and must define at
+# least SMARTD_SMTP_URL and SMARTD_MAIL_FROM.
 #
-# Encryption examples (put the uncommented lines into the .conf file):
+# Example .conf contents for encryption / AUTH (adjust to your server):
 #   Implicit TLS (SMTPS, port 465):
 #     SMARTD_SMTP_URL='smtps://mail.example.com:465'
 #   STARTTLS on port 587:
@@ -118,17 +119,13 @@ cat > %{buildroot}%{_sysconfdir}/smartd_warning.d/smart_curl_mail <<'SMART_CURL_
 #
 # Requires: curl with SMTP support (curl >= 7.20).
 
-# --- Default settings (plain SMTP, port 25, no encryption) ---
-SMARTD_SMTP_URL='smtp://localhost:25'
-SMARTD_MAIL_FROM='smartd@localhost'
-SMARTD_SMTP_AUTH_USER=
-SMARTD_SMTP_AUTH_PASS=
-SMARTD_CURL_OPTS=
-
-# Override with user configuration if present
-if [ -r /etc/smartd_warning.d/smart_curl_mail.conf ]; then
-  . /etc/smartd_warning.d/smart_curl_mail.conf
+# --- Read all configuration from the .conf file (no built-in defaults) ---
+SMARTD_CONF='/etc/smartd_warning.d/smart_curl_mail.conf'
+if [ ! -r "$SMARTD_CONF" ]; then
+  echo "$0: configuration file $SMARTD_CONF not found or not readable" >&2
+  exit 1
 fi
+. "$SMARTD_CONF"
 
 # Basic sanity checks
 if [ -z "$SMARTD_SMTP_URL" ] || [ -z "$SMARTD_MAIL_FROM" ]; then
@@ -191,17 +188,16 @@ curl "$@"
 SMART_CURL_MAIL_EOF
 chmod 755 %{buildroot}%{_sysconfdir}/smartd_warning.d/smart_curl_mail
 
-# Optional user configuration template (all values commented out = use defaults)
+# Configuration template (all active values can be edited here)
 cat > %{buildroot}%{_sysconfdir}/smartd_warning.d/smart_curl_mail.conf <<'SMART_CURL_MAIL_CONF_EOF'
 # /etc/smartd_warning.d/smart_curl_mail.conf
-# Optional configuration for the smart_curl_mail smartd warning plugin.
-# All values are commented out - the built-in defaults (plain SMTP to
-# localhost:25, no encryption, no authentication) are used instead.
-# Uncomment and adjust only what you need.  This file is read by
-# /etc/smartd_warning.d/smart_curl_mail.
+# Configuration for the smart_curl_mail smartd warning plugin.
+# The plugin has no built-in defaults - every setting below is read from this
+# file by /etc/smartd_warning.d/smart_curl_mail.  Edit the values to match your
+# SMTP server.  This file is required (the plugin aborts if it is missing).
 
 # SMTP server URL: plain SMTP (default, port 25) ...
-#SMARTD_SMTP_URL='smtp://localhost:25'
+SMARTD_SMTP_URL='smtp://localhost:25'
 # ... implicit TLS (SMTPS, port 465) ...
 #SMARTD_SMTP_URL='smtps://mail.example.com:465'
 # ... or plain port with STARTTLS (port 587):
@@ -209,17 +205,17 @@ cat > %{buildroot}%{_sysconfdir}/smartd_warning.d/smart_curl_mail.conf <<'SMART_
 #SMARTD_CURL_OPTS='--ssl-reqd'
 
 # Envelope and RFC 5322 'From:' address
-#SMARTD_MAIL_FROM='smartd@localhost'
+SMARTD_MAIL_FROM='smartd@localhost'
 
 # SMTP AUTH (LOGIN/PLAIN) credentials - empty disables AUTH.
 # NOTE: this file may contain a plaintext password.  If you set the AUTH
 # variables here, restrict access to root only:
 #   chmod 600 /etc/smartd_warning.d/smart_curl_mail.conf
-#SMARTD_SMTP_AUTH_USER=
-#SMARTD_SMTP_AUTH_PASS=
+SMARTD_SMTP_AUTH_USER=
+SMARTD_SMTP_AUTH_PASS=
 
 # Any additional curl options (space separated)
-#SMARTD_CURL_OPTS='--connect-timeout 10 --max-time 60'
+SMARTD_CURL_OPTS=
 SMART_CURL_MAIL_CONF_EOF
 chmod 644 %{buildroot}%{_sysconfdir}/smartd_warning.d/smart_curl_mail.conf
 

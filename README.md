@@ -56,9 +56,10 @@ The plugin is started by `/etc/smartd_warning.sh` and reads the message from the
 environment variables `SMARTD_ADDRESS`, `SMARTD_SUBJECT` and
 `SMARTD_FULLMESSAGE` (see `man smartd.conf` / `man smartd_warning.sh`).
 
-**Configuration** — `/etc/smartd_warning.d/smart_curl_mail.conf` overrides the
-built-in defaults. Default: plain SMTP to `localhost:25`, no encryption, no
-authentication. Supported variables:
+**Configuration** — `/etc/smartd_warning.d/smart_curl_mail.conf` is **required**:
+the plugin keeps no SMTP configuration of its own and reads every setting from
+this file (default values are provided as active entries in the template).
+Supported variables:
 
 - `SMARTD_SMTP_URL` — SMTP server URL (default `smtp://localhost:25`).
   - Implicit TLS (SMTPS, port 465): `SMARTD_SMTP_URL='smtps://mail.example.com:465'`

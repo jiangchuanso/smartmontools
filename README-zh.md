@@ -52,8 +52,9 @@ DEVICESCAN -m @smart_curl_mail,admin@example.com -M exec /etc/smartd_warning.sh
 `SMARTD_SUBJECT` 与 `SMARTD_FULLMESSAGE` 读取邮件内容
 （详见 `man smartd.conf` / `man smartd_warning.sh`）。
 
-**配置** —— `/etc/smartd_warning.d/smart_curl_mail.conf` 可覆盖内置默认值。
-默认：明文 SMTP 连接 `localhost:25`，不加密、不认证。支持的变量：
+**配置** —— `/etc/smartd_warning.d/smart_curl_mail.conf` 是**必需**的：脚本本身
+不含任何 SMTP 配置，所有设置均从该文件读取（模板中以生效的默认值提供）。
+支持的变量：
 
 - `SMARTD_SMTP_URL` —— SMTP 服务器地址（默认 `smtp://localhost:25`）。
   - 隐式 TLS（SMTPS，端口 465）：`SMARTD_SMTP_URL='smtps://mail.example.com:465'`
