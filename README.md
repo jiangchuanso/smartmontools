@@ -75,5 +75,31 @@ Supported variables:
 
 Requires `curl` with SMTP support (`curl >= 7.20`).
 
+**Testing** — let `smartd` send a one-time test email through the plugin using
+the `-M test` directive. This exercises the exact same code path (including
+`smart_curl_mail.conf`) as a real alert, so no separate script is needed.
+
+To verify the plugin without modifying `/etc/smartd.conf`, feed a single line
+to `smartd` and run it once in the foreground:
+
+```sh
+echo '/dev/sda -m admin@example.com -M test -M exec /etc/smartd_warning.sh' \
+  | smartd -c - -q onecheck
+```
+
+Replace `/dev/sda` with any configured device and `admin@example.com` with a
+recipient. `smartd` sends the test email during device registration and exits
+after one check; when the message arrives, the configuration is working.
+
+Alternatively, temporarily add `-M test` to the device line in
+`/etc/smartd.conf`, then restart the service and remove the directive
+afterwards:
+
+```sh
+systemctl restart smartd
+```
+
+A test email is sent on every `smartd` start while `-M test` is present.
+
 ## License
 Smartmontools uses [GNU GPL Version 2](https://www.gnu.org/licenses/gpl-2.0.html#SEC1) license. 
