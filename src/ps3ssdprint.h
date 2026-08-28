@@ -19,7 +19,10 @@
  *
  *  @param  e4:  Constant reference to parsed detailed counters (const smartmon::ps3_ssd_e4_log&)
  *  @param  e5:  Constant reference to parsed health levels (const smartmon::ps3_ssd_e5_log&)
+ *  @param  have_e4: true if the GP Log 0xE4 data is valid (bool)
+ *  @param  have_e5: true if the GP Log 0xE5 data is valid (bool)
  */
-void ataPrintPs3SsdLog(const smartmon::ps3_ssd_e4_log& e4, const smartmon::ps3_ssd_e5_log& e5);
+void ataPrintPs3SsdLog(const smartmon::ps3_ssd_e4_log& e4, const smartmon::ps3_ssd_e5_log& e5,
+                       bool have_e4, bool have_e5);
 
 #endif

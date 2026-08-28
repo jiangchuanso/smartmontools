@@ -97,9 +97,13 @@ struct ps3stor_tlv
   uint8_t buff[0];
 };
 
+// Max number of enclosures, must match PS3LIB_MAX_ENCL_NUM from the vendor
+// ps3lib API.  The count field is U16 because 256 does not fit into a U8.
+#define PS3STOR_MAX_ENCL_NUM            (256)
+
 struct ps3stor_encl_list
 {
-  uint8_t count;
+  uint16_t count;
   uint8_t idlist[0];
 };
 
@@ -297,7 +301,7 @@ public:
 
   virtual ps3stor_errno get_host_list(std::vector<unsigned> &hostlist) = 0;
 
-  ps3stor_errno get_enclcount(unsigned hostid, uint8_t &enclcount);
+  ps3stor_errno get_enclcount(unsigned hostid, uint16_t &enclcount);
 
   ps3stor_errno get_encllist(unsigned hostid, ps3stor_encl_list *&encllist, size_t listsize);
 

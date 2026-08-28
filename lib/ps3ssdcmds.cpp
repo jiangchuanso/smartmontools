@@ -24,6 +24,40 @@ namespace smartmon {
 static const unsigned char PS3_SSD_LOG_E4 = 0xE4; // Detailed counters
 static const unsigned char PS3_SSD_LOG_E5 = 0xE5; // Health levels
 
+// Return true if the log page carries no data at all (all 0x00 or all 0xff).
+// Drives which do not implement the vendor log may return such a page instead
+// of failing the READ LOG EXT command.
+static bool ps3_ssd_log_page_empty(const unsigned char * buf, unsigned size)
+{
+  bool all_zero = true, all_ff = true;
+  for (unsigned i = 0; i < size; i++) {
+    if (buf[i] != 0x00)
+      all_zero = false;
+    if (buf[i] != 0xff)
+      all_ff = false;
+    if (!all_zero && !all_ff)
+      break;
+  }
+  return all_zero || all_ff;
+}
+
+// Check the vendor signature for printable ASCII characters (NUL padding is
+// ignored).  The log layout is vendor specific and is not covered by any
+// public documentation, so a signature of binary garbage is the only reliable
+// indication that the layout does not match the one implemented here.
+static bool ps3_ssd_signature_valid(const unsigned char * sig, unsigned size)
+{
+  unsigned printable = 0;
+  for (unsigned i = 0; i < size; i++) {
+    if (sig[i] == 0x00)
+      continue; // padding
+    if (sig[i] < 0x20 || sig[i] >= 0x7f)
+      return false;
+    printable++;
+  }
+  return printable > 0;
+}
+
 /*
  *  Reads and parses the SSD vendor health log (GP Log 0xE4) detailed
  *  reliability counters from the device.
@@ -43,10 +77,19 @@ bool ataReadPs3SsdLogE4(ata_device * device, ps3_ssd_e4_log & log) {
     return device->set_err(EIO, "Read PS3 SSD log (GP Log 0xE4) failed: %s",
                            device->get_errmsg());
 
+  if (ps3_ssd_log_page_empty(buf, sizeof(buf)))
+    return device->set_err(EIO, "Read PS3 SSD log (GP Log 0xE4) failed: log page is empty");
+
   // Parse little-endian fields from the 512-byte log sector
   unsigned o = 0;
   log.revision_id = sg_get_unaligned_le16(buf + o); o += 2;
   memcpy(log.signature, buf + o, sizeof(log.signature)); o += sizeof(log.signature);
+
+  // Refuse to report values from a log page with an unknown layout
+  if (!ps3_ssd_signature_valid(log.signature, sizeof(log.signature)))
+    return device->set_err(EIO, "PS3 SSD log (GP Log 0xE4): unexpected vendor signature,"
+                                " log layout not supported");
+
   log.type = buf[o++];
   log.health_level = buf[o++];
   log.plp_capacitance = buf[o++];
@@ -109,6 +152,9 @@ bool ataReadPs3SsdLogE5(ata_device * device, ps3_ssd_e5_log & log) {
   if (!ataReadLogExt(device, PS3_SSD_LOG_E5, 0, 0, buf, 1))
     return device->set_err(EIO, "Read PS3 SSD log (GP Log 0xE5) failed: %s",
                            device->get_errmsg());
+
+  if (ps3_ssd_log_page_empty(buf, sizeof(buf)))
+    return device->set_err(EIO, "Read PS3 SSD log (GP Log 0xE5) failed: log page is empty");
 
   // All fields are single bytes (health level per counter)
   unsigned o = 0;
