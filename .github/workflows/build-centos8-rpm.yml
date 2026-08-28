@@ -1,12 +1,20 @@
 name: Build CentOS 8 RPMs (smartmontools)
 
-# Publishes CentOS 8 (el8) RPMs for both x86_64 and aarch64 on every GitHub
-# release. The binary is built *inside* a CentOS 8 container, so it links
-# against the CentOS 8 glibc and is guaranteed runtime-compatible.
+# Publishes CentOS 8 (el8) RPMs for both x86_64 and aarch64 and attaches them
+# to the SAME release that 'build.yml' creates on push to main (tag
+# 'smartmontools-<git-ver>'). The binary is built *inside* a CentOS 8 container,
+# so it links against the CentOS 8 glibc and is guaranteed runtime-compatible.
 #
 # Trigger:
-#   - A published GitHub Release (assets are attached automatically)
-#   - Manual run via workflow_dispatch (artifacts are uploaded only)
+#   - 'release: created' -> fired by build.yml when it publishes its release;
+#     the RPMs are attached to that very release automatically.
+#   - Manual run via workflow_dispatch (RPMs are built and attached to the
+#     matching release if one exists, otherwise only uploaded as artifacts).
+#
+# NOTE: to keep the RPM version string identical to the release tag produced by
+# build.yml, both checkout steps below use the release's target commit
+# (github.event.release.target_commitish). Otherwise two different releases
+# would be created.
 #
 # Layout (borrowed from build.yml / build-manually.yml):
 #   - 'make-src-tgz' creates the release tarball with 'make dist' and exports
@@ -17,7 +25,7 @@ name: Build CentOS 8 RPMs (smartmontools)
 
 on:
   release:
-    types: [published]
+    types: [created]
   workflow_dispatch:
 
 permissions:
@@ -35,6 +43,10 @@ jobs:
     steps:
       - uses: actions/checkout@v6
         with:
+          # Check out the release's target commit so the version string matches
+          # the tag that build.yml created (otherwise a different tag -> a
+          # second, unwanted release would be created).
+          ref: ${{ github.event.release.target_commitish || github.sha }}
           # smartmontools computes its version string from the git log
           # (util/getversion.sh). This is a pre-release build
           # (smartmontools_release_date is empty in configure.ac), so
@@ -93,6 +105,9 @@ jobs:
       - name: Checkout source
         uses: actions/checkout@v6
         with:
+          # Check out the release's target commit so the spec/version matches
+          # the tag created by build.yml.
+          ref: ${{ github.event.release.target_commitish || github.sha }}
           # Only the spec file is needed to build the RPM; the version
           # information comes from the release tarball of the 'make-src-tgz'
           # job, so a single commit is sufficient.
