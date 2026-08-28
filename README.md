@@ -32,12 +32,35 @@ health levels (GP Log 0xE5). The logs are read via standard ATA `READ LOG EXT`
 commands, so it works on SATA and SAT (USB bridge) devices without any vendor
 library.
 
+**Under a PS3Stor RAID controller** the SSD sits behind the controller and is
+not exposed as `/dev/sda`, so this option must be combined with the
+`-d ps3stor,N` device type and a `/dev/bus/M` device name
+(M = SCSI bus number, N = disk index on the controller, range 0..127):
+
+```sh
+# Read the PS3 SSD health log of disk 1 (index 1) behind controller /dev/bus/0
+smartctl -l ps3ssd -d ps3stor,1 /dev/bus/0
+
+# Show full info including the ps3ssd log
+smartctl -a -d ps3stor,1 /dev/bus/0 -l ps3ssd
+
+# List ps3stor devices that can be detected
+smartctl --scan
+```
+
+> Tip: N ranges from 0 to 127; with multiple controller cards the bus number
+> increments from 0 (1, 2, ...).
+
+On a directly attached SATA/SAT device it can also be used directly (smartctl
+auto-detects it as an ATA device):
+
 ```sh
 smartctl -l ps3ssd /dev/sda
 ```
 
 > **WARNING:** The log layout is vendor-specific; unsupported SSDs may report
-> meaningless values.
+> meaningless values. If it prints `not supported`, the drive does not expose
+> GP Log 0xE4/0xE5.
 
 ### `smart_curl_mail` (smartd warning plugin)
 

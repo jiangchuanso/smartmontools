@@ -30,11 +30,31 @@ OS/2、eComStation 或 QNX 系统，也可从众多 Live CD/DVD 中运行。
 `READ LOG EXT` 命令读取，因此可在 SATA 以及 SAT（USB 桥接）设备上使用，无需
 任何厂商私有库。
 
+**在 PS3Stor RAID 控制器下**，SSD 位于控制器之后，并不会直接映射为 `/dev/sda`，
+因此必须配合 `-d ps3stor,N` 设备类型，并把设备名写成 `/dev/bus/M`
+（M 为 SCSI 总线号，N 为控制器上的磁盘序号，取值范围 0–127）：
+
+```sh
+# 读取控制器 /dev/bus/0 上第 1 块盘（序号 1）的 PS3 SSD 健康日志
+smartctl -l ps3ssd -d ps3stor,1 /dev/bus/0
+
+# 查看完整信息并附带 ps3ssd 日志
+smartctl -a -d ps3stor,1 /dev/bus/0 -l ps3ssd
+
+# 先用 --scan 列出可被识别的 ps3stor 设备
+smartctl --scan
+```
+
+> 提示：N 的取值范围为 0–127；若有多张控制器卡，总线号会从 0 开始递增（1、2……）。
+
+直连的 SATA/SAT 设备上也可直接使用（由 smartctl 自动识别为 ATA 设备）：
+
 ```sh
 smartctl -l ps3ssd /dev/sda
 ```
 
 > **警告：** 该日志布局为厂商私有格式，不受支持的 SSD 可能输出无意义的数值。
+> 若提示 `not supported`，说明该盘未暴露 GP Log 0xE4/0xE5。
 
 ### `smart_curl_mail`（smartd 告警插件）
 
