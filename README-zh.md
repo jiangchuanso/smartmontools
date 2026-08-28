@@ -68,6 +68,28 @@ DEVICESCAN -m @smart_curl_mail,admin@example.com -M exec /etc/smartd_warning.sh
 
 依赖支持 SMTP 的 `curl`（`curl >= 7.20`）。
 
+**测试** —— 通过 `smartd` 的 `-M test` 指令发送一封一次性测试邮件。该方式与真实
+告警走完全相同的代码路径（包括读取 `smart_curl_mail.conf`），无需单独编写脚本。
+
+不修改 `/etc/smartd.conf` 即可验证插件：向 `smartd` 输入一行配置并前台运行一次：
+
+```sh
+echo '/dev/sda -m admin@example.com -M test -M exec /etc/smartd_warning.sh' \
+  | smartd -c - -q onecheck
+```
+
+将 `/dev/sda` 换成任一已配置设备，`admin@example.com` 换成收件人。`smartd` 在
+注册设备期间发送测试邮件，检查一次后退出；收到邮件即说明配置生效。
+
+或者，临时在 `/etc/smartd.conf` 的设备行添加 `-M test`，重启服务，验证后移除该
+选项：
+
+```sh
+systemctl restart smartd
+```
+
+只要 `-M test` 存在，每次 `smartd` 启动时都会发送一封测试邮件。
+
 ## 许可证
 
 Smartmontools 使用 [GNU GPL Version 2](https://www.gnu.org/licenses/gpl-2.0.html#SEC1) 许可证。
