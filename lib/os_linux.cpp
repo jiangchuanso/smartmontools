@@ -4336,8 +4336,8 @@ ps3stor_errno linux_ps3stor_channel::firecmd_scsi(unsigned hostid, ps3stor_msg_i
   // beyond it would corrupt the stack.  The callers keep the payload below
   // 14 * 4KiB SGL entries, so this should never trigger.
   if (inblk + outblk + scsiblk > 16) {
-    set_err(EINVAL, "ps3stor: too many SGE entries (%u), maximum is 16",
-            (unsigned)(inblk + outblk + scsiblk));
+    set_err(EINVAL, strprintf("ps3stor: too many SGE entries (%u), maximum is 16",
+                              (unsigned)(inblk + outblk + scsiblk)).c_str());
     return -1;
   }
 
@@ -4503,7 +4503,8 @@ ps3stor_errno linux_ps3stor_channel::get_pci_info(unsigned host, ps3stor_pci_inf
   char filelink[128] = {};
 
   snprintf(path, sizeof(path) - 1, "/sys/class/scsi_host/host%u", host);
-  err = readlink(path, filelink, sizeof(filelink));
+  // Reserve one byte for the NUL terminator, readlink() does not append one
+  err = readlink(path, filelink, sizeof(filelink) - 1);
   if (err < 0) 
     return errno;
 
