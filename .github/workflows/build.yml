@@ -263,60 +263,6 @@ jobs:
           path: artifacts/smartmontools-win32-setup-${{ needs.make-src-tgz.outputs.SMARTMONTOOLS_GIT_VER_FNAME }}.exe
           retention-days: 1
 
-  compile-cygwin:
-    name: Creating Cygwin binaries
-    needs: make-src-tgz
-    runs-on: ubuntu-latest
-    # Cross build on Fedora is faster than the native build done by 'cygwin.yml'.
-    # The recipes below are partly borrowed from Cygwin's own CI build
-    # Follow upstream official CI: use 'fedora:latest' (same as smartmontools/smartmontools).
-    # The yselkowitz/cygwin COPR may lag behind a fresh Fedora release, so the retry loop
-    # below tolerates intermittent metadata fetch timeouts. If a new Fedora chroot is not
-    # yet available from COPR, simply re-run the job once it catches up.
-    container: fedora:latest
-    env:
-      SOURCE_DATE_EPOCH: ${{ needs.make-src-tgz.outputs.SOURCE_DATE_EPOCH }}
-      SMARTMONTOOLS_PKG_VER: ${{ needs.make-src-tgz.outputs.SMARTMONTOOLS_PKG_VER }}
-      SMARTMONTOOLS_GIT_VER_FNAME: ${{ needs.make-src-tgz.outputs.SMARTMONTOOLS_GIT_VER_FNAME }}
-    steps:
-      - name: Install build tools
-        run: |
-          dnf install -y make
-      - name: Enable 'dnf copr'
-        run: |
-          dnf install -y dnf-plugins-core
-      - name: Install cross-cygwin toolchain
-        run: |
-          # Retry: the COPR metadata fetch can fail intermittently with timeouts
-          # (Curl error 28 'too slow' / 56 'connection reset'), so retry a few times.
-          for i in 1 2 3; do
-            if dnf copr enable -y yselkowitz/cygwin && \
-               dnf install -y cygwin64-gcc-c++; then
-              break
-            fi
-            echo "Attempt $i to install Cygwin cross-toolchain failed, retrying..." >&2
-            sleep 15
-          done
-      - uses: actions/download-artifact@v8
-        with:
-          artifact-ids: ${{ needs.make-src-tgz.outputs.artficact-id }}
-          path: artifacts
-      - name: Cygwin build
-        run: |
-          tar -xvf artifacts/smartmontools-${SMARTMONTOOLS_GIT_VER_FNAME}.tar.gz &&
-          cd smartmontools-${SMARTMONTOOLS_PKG_VER} && mkdir build && cd build &&
-          ../configure --build=$(../config.guess) --host=x86_64-pc-cygwin \
-            --with-build-info='(GHA Build)' SOURCE_DATE_EPOCH=${SOURCE_DATE_EPOCH} &&
-          make -j && make check &&
-          mkdir -p ${GITHUB_WORKSPACE}/artifacts &&
-          make bin-dist bin_distfile="${GITHUB_WORKSPACE}/artifacts/smartmontools-cygwin-${SMARTMONTOOLS_GIT_VER_FNAME}.tar.gz"
-      - name: Upload artifacts
-        uses: actions/upload-artifact@v7
-        with:
-          name: cygwin
-          path: artifacts/smartmontools-cygwin-${{ needs.make-src-tgz.outputs.SMARTMONTOOLS_GIT_VER_FNAME }}.tar.gz
-          retention-days: 1
-
   publish-artifacts:
     # Publish all built artifacts to a GitHub Release on THIS repository.
     # Runs only on pushes to 'main' of this repo.
@@ -333,7 +279,6 @@ jobs:
       - compile-darwin
       - compile-freebsd
       - compile-windows
-      - compile-cygwin
     runs-on: ubuntu-latest
     # 'contents: write' is required for the default GITHUB_TOKEN to create
     # releases and tags.
