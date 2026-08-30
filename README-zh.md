@@ -23,43 +23,6 @@ OS/2、eComStation 或 QNX 系统，也可从众多 Live CD/DVD 中运行。
 
 本分支在官方 smartmontools 基础上新增了以下命令与功能：
 
-### `smartctl -l ps3ssd`（ATA）
-
-打印 PS3 存储控制器场景下 SSD 的厂商健康日志：详细的可靠性计数器
-（GP Log 0xE4）以及各计数器的健康等级（GP Log 0xE5）。该日志通过标准的 ATA
-`READ LOG EXT` 命令读取，因此可在 SATA 以及 SAT（USB 桥接）设备上使用，无需
-任何厂商私有库。
-
-**在 PS3Stor RAID 控制器下**，SSD 位于控制器之后，并不会直接映射为 `/dev/sda`，
-因此必须配合 `-d ps3stor,N` 设备类型，并把设备名写成 `/dev/bus/M`
-（M 为 SCSI 总线号，N 为控制器上的磁盘序号，取值范围 0–127）：
-
-```sh
-# 读取控制器 /dev/bus/0 上第 1 块盘（序号 1）的 PS3 SSD 健康日志
-smartctl -l ps3ssd -d ps3stor,1 /dev/bus/0
-
-# 查看完整信息并附带 ps3ssd 日志
-smartctl -a -d ps3stor,1 /dev/bus/0 -l ps3ssd
-
-# 先用 --scan 列出可被识别的 ps3stor 设备
-smartctl --scan
-```
-
-> 提示：N 的取值范围为 0–127；若有多张控制器卡，总线号会从 0 开始递增（1、2……）。
-
-直连的 SATA/SAT 设备上也可直接使用（由 smartctl 自动识别为 ATA 设备）：
-
-```sh
-smartctl -l ps3ssd /dev/sda
-```
-
-> **警告：** 该日志布局为厂商私有格式，且**未**包含在存储控制器的厂商文档中
-> （厂商文档只描述了 `ps3cli /cx /ex /sx show smart` 的通用 SMART 信息），
-> 应属于 SSD 厂商定义。因此 `smartctl` 会校验日志页中的厂商签名，若签名不可识别
-> 则报 `PS3 SSD log (GP Log 0xE4): unexpected vendor signature, log layout not
-> supported`，而不是输出无法解读的数值。
-> 若提示 `not supported`，说明该盘未暴露 GP Log 0xE4/0xE5。
-
 ### `smart_curl_mail`（smartd 告警插件）
 
 一个 `smartd_warning.d` 插件，通过 `curl(1)` **直接走 SMTP 协议**发送 `smartd`

@@ -32,8 +32,6 @@
 
 #include <smartmon/farmcmds.h>
 #include "farmprint.h"
-#include <smartmon/ps3ssdcmds.h>
-#include "ps3ssdprint.h"
 
 using namespace smartmon;
 
@@ -3543,7 +3541,6 @@ int ataPrintMain (ata_device * device, const ata_print_options & options)
        || !options.devstat_pages.empty()
        || options.pending_defects_log
        || options.farm_log
-       || options.ps3_ssd_log
   );
 
   unsigned i;
@@ -3575,7 +3572,6 @@ int ataPrintMain (ata_device * device, const ata_print_options & options)
        || need_sct_support
        || options.sataphy
        || options.farm_log
-       || options.ps3_ssd_log
        || options.identify_word_level >= 0
        || options.get_set_used
   );
@@ -4643,33 +4639,6 @@ int ataPrintMain (ata_device * device, const ata_print_options & options)
       farm_supported = false;
     }
     jglb["seagate_farm_log"]["supported"] = farm_supported;
-  }
-
-  // Print SSD vendor health log (GP Log 0xE4/0xE5) for PS3 storage scenario
-  if (options.ps3_ssd_log) {
-    unsigned e4_nsectors = GetNumLogSectors(gplogdir, 0xE4, true);
-    unsigned e5_nsectors = GetNumLogSectors(gplogdir, 0xE5, true);
-    if (!e4_nsectors && !e5_nsectors)
-      jout("PS3 SSD Health Log (GP Log 0xe4/0xe5) not supported\n\n");
-    else {
-      ps3_ssd_e4_log e4 = {};
-      ps3_ssd_e5_log e5 = {};
-      bool e4_ok = false, e5_ok = false;
-      if (e4_nsectors) {
-        e4_ok = ataReadPs3SsdLogE4(device, e4);
-        if (!e4_ok)
-          pout("Read PS3 SSD log (GP Log 0xe4) failed: %s\n\n", device->get_errmsg());
-      }
-      if (e5_nsectors) {
-        e5_ok = ataReadPs3SsdLogE5(device, e5);
-        if (!e5_ok)
-          pout("Read PS3 SSD log (GP Log 0xe5) failed: %s\n\n", device->get_errmsg());
-      }
-      if (e4_ok || e5_ok) {
-        ataPrintPs3SsdLog(e4, e5, e4_ok, e5_ok);
-        jout("\n");
-      }
-    }
   }
 
   // Suggest '-x' if '-a' is specified without any advanced option

@@ -65,7 +65,6 @@ libsmartmon_la_SOURCES = \
         knowndrives.cpp \
         nvmecmds.cpp \
         json.cpp \
-        ps3ssdcmds.cpp \
         scsicmds.cpp \
         scsiata.cpp \
         scsinvme.cpp \
