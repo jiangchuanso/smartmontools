@@ -8,7 +8,7 @@ on:
         required: false
         default: >-
           ubuntu-x86_64-gcc ubuntu-arm64-gcc ubuntu-x86_64-clang ubuntu-arm64-clang
-          fedora darwin freebsd-14 freebsd-15 windows-x86_64 os2emx
+          fedora darwin freebsd-14 freebsd-15 windows-x86_64 cygwin os2emx
       libs-ubuntu:
         description: "Additional libraries for Ubuntu or 'none'"
         required: false
@@ -564,6 +564,47 @@ jobs:
       - name: Run smartctl ${{ github.event.inputs.check-options }}
         run: |
           bin/smartctl ${{ github.event.inputs.check-options }}
+
+  build-cygwin:
+    if: ${{ contains(github.event.inputs.platforms, 'cygwin') }}
+    needs: build-source-tarball
+    runs-on: ubuntu-latest
+    # Cross build on Fedora is faster than the native build done by 'cygwin.yml'.
+    # The recipes below are partly borrowed from Cygwin's own CI build.
+    container: fedora:latest
+
+    steps:
+      - name: Install cross-cygwin toolchain
+        run: |
+          dnf install -y make
+          dnf install -y dnf-plugins-core
+          dnf copr enable -y yselkowitz/cygwin
+          dnf install -y cygwin64-gcc-c++
+
+      - uses: actions/download-artifact@v8
+        with:
+          name: smartmontools-src
+
+      - name: Build
+        run: |
+          distfile=$(ls -d smartmontools-*.tar.gz) && test "$(echo "$distfile" | wc -l)" = 1 &&
+          tar -xf "$distfile" && distdir=${distfile%-*-g*.tar.gz} &&
+          version_sh=$("$distdir/util/getversion.sh" -s) && eval "${version_sh}" &&
+          cd smartmontools-${SMARTMONTOOLS_PKG_VER} && mkdir build && cd build &&
+          ../configure --build=$(../config.guess) --host=x86_64-pc-cygwin \
+            --with-build-info='(GHA/${{ github.event.inputs.suffix }})' \
+            ${{ github.event.inputs.cfg-options }} \
+            LDFLAGS='-L/usr/x86_64-pc-cygwin/sys-root/usr/lib/w32api' \
+            SOURCE_DATE_EPOCH=$((SMARTMONTOOLS_GIT_REV_EPOCH + 1)) &&
+          make ${{ github.event.inputs.make-options }} && make check &&
+          bin_distfile="../../smartmontools-cygwin-${{ github.event.inputs.suffix }}-${SMARTMONTOOLS_GIT_VER_FNAME}.tar.gz" &&
+          make bin_distfile="$bin_distfile" bin-dist && tar -tvf "$bin_distfile"
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: smartmontools-cygwin-${{ github.event.inputs.suffix }}
+          path: smartmontools-cygwin-${{ github.event.inputs.suffix }}-*.tar.gz
+          retention-days: 90
 
   build-os2emx:
     # '--enable-shared' fails due to syntax error in generated 'smartmon.def'
