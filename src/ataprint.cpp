@@ -3543,6 +3543,7 @@ int ataPrintMain (ata_device * device, const ata_print_options & options)
        || !options.devstat_pages.empty()
        || options.pending_defects_log
        || options.farm_log
+       || options.ps3_ssd_log
   );
 
   unsigned i;

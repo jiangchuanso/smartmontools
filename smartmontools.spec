@@ -18,7 +18,7 @@
 
 Name:           smartmontools
 Version:        8.0
-Release:        1%{?dist}
+Release:        2%{?dist}
 Summary:        Control and monitor storage systems using S.M.A.R.T.
 
 License:        GPL-2.0-or-later
@@ -299,6 +299,12 @@ chmod 644 %{buildroot}%{_sysconfdir}/smartd_warning.d/smart_curl_mail.conf
 
 %changelog
 * Sun Aug 30 2026 smartmontools RPM maintainer <maintainer@example.com> - 8.0-2
+- smartctl -l ps3ssd: read the GP Log Directory even when 'ps3ssd' is the only
+  requested log (previously '-l ps3ssd' alone always reported 'not supported').
+- smartctl -d ps3stor,N: guard firecmd() against SGL entries > 16 (same fixed
+  size SGL as firecmd_scsi).
+- smartctl -d ps3stor,N: only copy sense data when the sense buffer exists and
+  has non-zero length (memcpy with a NULL destination is undefined behaviour).
 - smart_curl_mail: fix SMTP AUTH, 'curl --login/--password' does not exist and
   made every authenticated run fail; use 'curl --user USER:PASS' instead.
 - smart_curl_mail: resolve the recipients from SMARTD_ADDRESS, then from
