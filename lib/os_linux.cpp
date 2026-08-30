@@ -2533,7 +2533,8 @@ bool linux_ps3stor_device::scsi_cmd(scsi_cmnd_io *iop)
 
   ps3stor_scsi_rsp scsirsp{};
   if (PS3STOR_ERRNO_SUCCESS != ps3chn()->pd_scsi_passthrough(m_host, eid, sid, scsireq, scsirsp, iop->dxferp, iop->dxfer_len)) {
-    return -1;
+    // NOTE: must not 'return -1' here, this function returns bool
+    return set_err(EIO, "linux_ps3stor_device::scsi_cmd: passthrough of device %u failed", m_did);
   }
 
   if (scsirsp.entry.status != 0) {
@@ -3534,11 +3535,11 @@ bool linux_smart_interface::scan_smart_devices(smart_device_list & devlist,
     else
       return set_err(EINVAL,
                      "Invalid type '%s', valid arguments are:"
-                     " by-id, ata, scsi, sat, sg, nvme, megaraid, sssraid",
+                     " by-id, ata, scsi, sat, sg, nvme, megaraid, sssraid, ps3stor",
                      type);
   }
   // Use default if no type specified
-  if (!(type_ata || type_scsi || type_sat || type_nvme || scan_megaraid || scan_sssraid)) {
+  if (!(type_ata || type_scsi || type_sat || type_nvme || scan_megaraid || scan_sssraid || scan_ps3stor)) {
      type_ata = type_scsi = type_sat = type_nvme = "";
      scan_megaraid = scan_sssraid = scan_ps3stor = true;
   }
@@ -3824,14 +3825,17 @@ int linux_smart_interface::ps3stor_pd_add_list(int bus_no, smart_device_list &de
 int linux_smart_interface::ps3stor_pdlist_cmd(int bus_no, std::vector<uint16_t> &devidlist)
 {
   // get enclist and get devlsit for each encl
-  uint8_t enclcount = 0;
+  uint16_t enclcount = 0;
   ps3stor_encl_list *encllist = nullptr; 
   std::unique_ptr<uint8_t[]> encllist_buf;
 
   //1.get encl count
   if (PS3STOR_ERRNO_SUCCESS != ps3chn()->get_enclcount(bus_no, enclcount)) {
     return -1;
-  } 
+  }
+  if (enclcount > PS3STOR_MAX_ENCL_NUM)
+    enclcount = PS3STOR_MAX_ENCL_NUM;
+
 
   //2.get encl list
   if (enclcount > 0) {
@@ -3847,7 +3851,7 @@ int linux_smart_interface::ps3stor_pdlist_cmd(int bus_no, std::vector<uint16_t> 
   //3.get pd list for each encl
   if (encllist != nullptr && encllist->count > 0) {
     enclcount = PS3STOR_MIN(enclcount, encllist->count);
-    for (uint8_t i = 0; i < enclcount; i++) {
+    for (uint16_t i = 0; i < enclcount; i++) {
       uint16_t devcount = 0;
       uint8_t eid = encllist->idlist[i];
       if (PS3STOR_ERRNO_SUCCESS != ps3chn()->pd_get_devcount_by_encl(bus_no, eid, devcount)) {
@@ -4131,6 +4135,8 @@ smart_device * linux_smart_interface::get_custom_smart_device(const char * name,
 
   // ps3stor ?
   if (sscanf(type, "ps3stor,%d", &disknum) == 1) {
+    if (!(0 <= disknum && disknum <= 127))
+      return set_err_np(EINVAL, "Option -d ps3stor,N (N=%d) must have 0 <= N <= 127", disknum);
     if (ps3stor_init()) {
       return new linux_ps3stor_device(this, name, disknum);
     } else {
@@ -4326,13 +4332,20 @@ ps3stor_errno linux_ps3stor_channel::firecmd_scsi(unsigned hostid, ps3stor_msg_i
   const uint16_t outblk = (uint16_t)((acksize + PS3STOR_SGL_SIZE -1) / PS3STOR_SGL_SIZE);
   const uint16_t scsiblk = (uint16_t)scsicount;
 
+  // The ioctl packet carries a fixed-size SGL (packet.sgl[16]); writing
+  // beyond it would corrupt the stack.  The callers keep the payload below
+  // 14 * 4KiB SGL entries, so this should never trigger.
+  if (inblk + outblk + scsiblk > 16) {
+    set_err(EINVAL, "ps3stor: too many SGE entries (%u), maximum is 16",
+            (unsigned)(inblk + outblk + scsiblk));
+    return -1;
+  }
+
   ps3stor_ioctl_sync_cmd packet{};
   packet.hostid = (uint16_t)hostid;
   packet.sge_count = inblk + outblk + scsiblk;
   packet.sgl_offset = offsetof(ps3stor_ioctl_sync_cmd, sgl) / sizeof(uint32_t); // 4 bytes
   packet.traceid = reqinfo->traceid;
-
-  //todo check for sge_count <= 16
 
   reqinfo->index.tlv = 0;
   reqinfo->index.ack = (uint8_t)(inblk);
@@ -4389,7 +4402,7 @@ ps3stor_tlv *linux_ps3stor_channel::add_tlv_data(ps3stor_tlv *tlv, unsigned type
   ps3stor_tlv * tmp = reinterpret_cast<ps3stor_tlv *>(realloc(tlv, tlvsize));
   if (!tmp) {
     free(tlv);
-    throw std::bad_alloc();
+    return nullptr;  // callers check for nullptr instead of taking an exception
   }
   if (!tlv) 
     tmp->size = 0;
@@ -4497,7 +4510,8 @@ ps3stor_errno linux_ps3stor_channel::get_pci_info(unsigned host, ps3stor_pci_inf
   err = -1;
   const char templatestr[] = "0000:00:00.0"; // look up pci addr by file link
   unsigned templen = strlen(templatestr);
-  if (strlen(path) < templen)
+  // NOTE: check the *link target* (filelink), not the symlink path
+  if (strlen(filelink) < templen)
     return -1;
 
   for(unsigned i = 0; *(filelink + i + templen) != '\0'; i++){

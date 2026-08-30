@@ -28,6 +28,13 @@ namespace smartmon {
 //
 // All multi-byte fields in the logs are little-endian.  Parsing is done with
 // sg_get_unaligned_le* helpers so the host byte order does not matter.
+//
+// WARNING: This layout is NOT covered by any public documentation of the
+// storage controller (the vendor documentation only describes the generic
+// SMART information provided by 'ps3cli /cx /ex /sx show smart').  It is
+// assumed to be defined by the SSD vendor.  Readers therefore check the
+// vendor signature and refuse to report values from a log page whose layout
+// does not match (see ataReadPs3SsdLogE4()).
 
 // GP Log 0xE4: detailed reliability counters
 struct ps3_ssd_e4_log {

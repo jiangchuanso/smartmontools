@@ -58,9 +58,14 @@ auto-detects it as an ATA device):
 smartctl -l ps3ssd /dev/sda
 ```
 
-> **WARNING:** The log layout is vendor-specific; unsupported SSDs may report
-> meaningless values. If it prints `not supported`, the drive does not expose
-> GP Log 0xE4/0xE5.
+> **WARNING:** The log layout is vendor-specific and is **not** covered by the
+> documentation of the storage controller (which only describes the generic
+> SMART information of `ps3cli /cx /ex /sx show smart`); it is assumed to be
+> defined by the SSD vendor. `smartctl` therefore checks the vendor signature
+> of the log page and reports
+> `PS3 SSD log (GP Log 0xE4): unexpected vendor signature, log layout not
+> supported` instead of printing values from a page it cannot decode.
+> If it prints `not supported`, the drive does not expose GP Log 0xE4/0xE5.
 
 ### `smart_curl_mail` (smartd warning plugin)
 
@@ -69,15 +74,31 @@ SMTP** using `curl(1)`. A local MTA (sendmail/postfix) is **not** required.
 
 **Usage** — in `/etc/smartd.conf`, add the plugin name (with a leading `@`) to
 the comma-separated `-m` address list and use `/etc/smartd_warning.sh` as the
-exec script:
+exec script. The recommended form lists **only** the plugin, so that no local
+mailer is involved:
 
 ```sh
-DEVICESCAN -m @smart_curl_mail,admin@example.com -M exec /etc/smartd_warning.sh
+DEVICESCAN -m @smart_curl_mail -M exec /etc/smartd_warning.sh
 ```
 
+The recipients then come from `SMARTD_MAIL_TO` in `smart_curl_mail.conf`.
+
+> **Note:** do not write `-m @smart_curl_mail,admin@example.com -M exec
+> /etc/smartd_warning.sh`. `smartd_warning.sh` strips only the `@plugin` words
+> from `SMARTD_ADDRESS` and then runs `$SMARTD_MAILER` for the remaining
+> addresses — which is the warning script itself here — so it aborts with
+> "possible recursion" and `smartd` logs a failure even though the mail was
+> already sent. If you want a plain address in the `-m` list, point `-M exec`
+> at a real mailer:
+> `DEVICESCAN -m @smart_curl_mail,admin@example.com -M exec /usr/bin/mail`
+
 The plugin is started by `/etc/smartd_warning.sh` and reads the message from the
-environment variables `SMARTD_ADDRESS`, `SMARTD_SUBJECT` and
-`SMARTD_FULLMESSAGE` (see `man smartd.conf` / `man smartd_warning.sh`).
+environment variables `SMARTD_ADDRESS`, `SMARTD_ADDRESS_ORIG`, `SMARTD_SUBJECT`
+and `SMARTD_FULLMESSAGE` (see `man smartd.conf` / `man smartd_warning.sh`).
+
+Recipients are looked up in this order: plain addresses left in
+`SMARTD_ADDRESS`, then the original `-m` list `SMARTD_ADDRESS_ORIG` without the
+`@plugin` words, then `SMARTD_MAIL_TO` from the config file.
 
 **Configuration** — `/etc/smartd_warning.d/smart_curl_mail.conf` is **required**:
 the plugin keeps no SMTP configuration of its own and reads every setting from
@@ -90,9 +111,12 @@ Supported variables:
     `SMARTD_CURL_OPTS='--ssl-reqd'`
 - `SMARTD_MAIL_FROM` — envelope and RFC 5322 `From:` address
   (default `smartd@localhost`).
-- `SMARTD_SMTP_AUTH_USER` / `SMARTD_SMTP_AUTH_PASS` — SMTP AUTH (LOGIN/PLAIN)
-  credentials; empty disables AUTH. If set, restrict the file to root only
-  (`chmod 600 smart_curl_mail.conf`).
+- `SMARTD_MAIL_TO` — recipients (space separated, default `root@localhost`).
+  Only used when the `-m` Directive contains no plain address.
+- `SMARTD_SMTP_AUTH_USER` / `SMARTD_SMTP_AUTH_PASS` — SMTP AUTH, sent as
+  `curl --user USER:PASS`; curl picks the mechanism (LOGIN/PLAIN/...) offered
+  by the server. Empty user disables AUTH. If set, restrict the file to root
+  only (`chmod 600 smart_curl_mail.conf`).
 - `SMARTD_CURL_OPTS` — any additional curl options (space separated), e.g.
   `--connect-timeout 10 --max-time 60`.
 
@@ -106,13 +130,16 @@ To verify the plugin without modifying `/etc/smartd.conf`, feed a single line
 to `smartd` and run it once in the foreground:
 
 ```sh
-echo '/dev/sda -m admin@example.com -M test -M exec /etc/smartd_warning.sh' \
+echo '/dev/sda -m @smart_curl_mail -M test -M exec /etc/smartd_warning.sh' \
   | smartd -c - -q onecheck
 ```
 
-Replace `/dev/sda` with any configured device and `admin@example.com` with a
-recipient. `smartd` sends the test email during device registration and exits
-after one check; when the message arrives, the configuration is working.
+Replace `/dev/sda` with any configured device. The `@smart_curl_mail` word is
+mandatory — without it `smartd_warning.sh` does not run any plugin and the test
+would not cover the plugin at all. `smartd` sends the test email during device
+registration and exits after one check; when the message arrives, the
+configuration is working (the recipients are the ones configured with
+`SMARTD_MAIL_TO`).
 
 Alternatively, temporarily add `-M test` to the device line in
 `/etc/smartd.conf`, then restart the service and remove the directive

@@ -1724,8 +1724,11 @@ not exposed as /dev/sda, so this option must be combined with
 .br
 If the drive does not expose GP Log 0xE4/0xE5, the message
 \*(AqPS3 SSD Health Log (GP Log 0xe4/0xe5) not supported\*(Aq is printed.
-\fBWARNING: The log layout is vendor-specific, unsupported SSDs may
-report meaningless values.\fP
+\fBWARNING: The log layout is vendor-specific. It is not covered by the
+documentation of the storage controller, so \fBsmartctl\fP checks the vendor
+signature of the log page and reports an error if the layout does not match,
+instead of printing values it cannot decode. Unsupported SSDs may still report
+meaningless values.\fP
 .TP
 .B \-v ID,FORMAT[:BYTEORDER][,NAME], \-\-vendorattribute=ID,FORMAT...
 [ATA only] Sets a vendor-specific raw value print FORMAT, an optional

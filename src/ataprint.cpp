@@ -4651,8 +4651,8 @@ int ataPrintMain (ata_device * device, const ata_print_options & options)
     if (!e4_nsectors && !e5_nsectors)
       jout("PS3 SSD Health Log (GP Log 0xe4/0xe5) not supported\n\n");
     else {
-      ps3_ssd_e4_log e4;
-      ps3_ssd_e5_log e5;
+      ps3_ssd_e4_log e4 = {};
+      ps3_ssd_e5_log e5 = {};
       bool e4_ok = false, e5_ok = false;
       if (e4_nsectors) {
         e4_ok = ataReadPs3SsdLogE4(device, e4);
@@ -4665,7 +4665,7 @@ int ataPrintMain (ata_device * device, const ata_print_options & options)
           pout("Read PS3 SSD log (GP Log 0xe5) failed: %s\n\n", device->get_errmsg());
       }
       if (e4_ok || e5_ok) {
-        ataPrintPs3SsdLog(e4, e5);
+        ataPrintPs3SsdLog(e4, e5, e4_ok, e5_ok);
         jout("\n");
       }
     }

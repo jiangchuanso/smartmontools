@@ -13,6 +13,7 @@
 #define __STDC_FORMAT_MACROS 1
 #include <inttypes.h>
 #include <stdio.h>
+#include <string.h>
 
 #include "ps3ssdprint.h"
 #include "smartctl.h"
@@ -32,31 +33,25 @@ static const char * ps3_ssd_level_desc(uint8_t level)
   }
 }
 
-// Print signature bytes (printable chars only)
-static void ps3_ssd_print_signature(const uint8_t signature[5], char (& out)[6])
+// Print signature bytes (printable chars only), "unknown" if there is none
+static void ps3_ssd_print_signature(const uint8_t signature[5], char (& out)[16])
 {
   unsigned j = 0;
   for (unsigned i = 0; i < 5; i++) {
     if (32 <= signature[i] && signature[i] < 127)
       out[j++] = (char)signature[i];
   }
-  out[j] = '\0';
+  if (j == 0)
+    strcpy(out, "unknown");
+  else
+    out[j] = '\0';
 }
 
-/*
- *  Prints the parsed PS3 SSD health log (GP Log 0xE4/0xE5) data
- *  already present in the ps3_ssd_e4_log / ps3_ssd_e5_log structures
- *
- *  @param  e4:  Constant reference to parsed detailed counters (const ps3_ssd_e4_log&)
- *  @param  e5:  Constant reference to parsed health levels (const ps3_ssd_e5_log&)
- */
-void ataPrintPs3SsdLog(const ps3_ssd_e4_log& e4, const ps3_ssd_e5_log& e5)
+// Print plain-text detailed counters (GP Log 0xE4)
+static void ps3_ssd_print_e4(const ps3_ssd_e4_log& e4)
 {
-  jout("PS3 SSD Health Log (GP Log 0xe4/0xe5)\n");
-
-  // Print plain-text detailed counters (GP Log 0xE4)
   jout("\tDetailed Counters (GP Log 0xe4)\n");
-  char sig[6];
+  char sig[16];
   ps3_ssd_print_signature(e4.signature, sig);
   jout("\t\tLog Revision: %" PRIu16 "\n", e4.revision_id);
   jout("\t\tSignature: %s\n", sig);
@@ -103,8 +98,11 @@ void ataPrintPs3SsdLog(const ps3_ssd_e4_log& e4, const ps3_ssd_e5_log& e5)
   jout("\t\tPower-On Hours: %" PRIu32 "\n", e4.power_on_hours);
   jout("\t\tPower Cycle Count: %" PRIu32 "\n", e4.power_cycle_cnt);
   jout("\t\tLifetime Used: %" PRIu32 " %%\n", e4.lifetime_used);
+}
 
-  // Print plain-text health levels (GP Log 0xE5)
+// Print plain-text health levels (GP Log 0xE5)
+static void ps3_ssd_print_e5(const ps3_ssd_e5_log& e5)
+{
   jout("\tHealth Levels (GP Log 0xe5)\n");
   jout("\t\tOverall Health Level: %u (%s)\n", e5.health_level, ps3_ssd_level_desc(e5.health_level));
   jout("\t\tPLP Capacitance: %u (%s)\n", e5.plp_cap_err_level, ps3_ssd_level_desc(e5.plp_cap_err_level));
@@ -148,12 +146,15 @@ void ataPrintPs3SsdLog(const ps3_ssd_e4_log& e4, const ps3_ssd_e5_log& e5)
   jout("\t\tPower-On Hours: %u (%s)\n", e5.power_on_hours_err_level, ps3_ssd_level_desc(e5.power_on_hours_err_level));
   jout("\t\tPower Cycle Count: %u (%s)\n", e5.power_cycle_err_level, ps3_ssd_level_desc(e5.power_cycle_err_level));
   jout("\t\tLifetime Used: %u (%s)\n", e5.lifetime_used_err_level, ps3_ssd_level_desc(e5.lifetime_used_err_level));
+}
 
-  // Print JSON if --json or -j is specified
+// Print JSON detailed counters (GP Log 0xE4) if --json or -j is specified
+static void ps3_ssd_print_e4_json(const ps3_ssd_e4_log& e4)
+{
   json::ref jref = jglb["ps3_ssd_log"];
-
-  // Detailed counters (GP Log 0xE4)
   json::ref jref4 = jref["e4_detailed_counters"];
+  char sig[16];
+  ps3_ssd_print_signature(e4.signature, sig);
   jref4["log_revision"] = e4.revision_id;
   jref4["signature"] = sig;
   jref4["log_type"] = e4.type;
@@ -199,8 +200,12 @@ void ataPrintPs3SsdLog(const ps3_ssd_e4_log& e4, const ps3_ssd_e5_log& e5)
   jref4["power_on_hours"] = e4.power_on_hours;
   jref4["power_cycle_cnt"] = e4.power_cycle_cnt;
   jref4["lifetime_used"] = e4.lifetime_used;
+}
 
-  // Health levels (GP Log 0xE5)
+// Print JSON health levels (GP Log 0xE5) if --json or -j is specified
+static void ps3_ssd_print_e5_json(const ps3_ssd_e5_log& e5)
+{
+  json::ref jref = jglb["ps3_ssd_log"];
   json::ref jref5 = jref["e5_health_levels"];
   jref5["health_level"] = e5.health_level;
   jref5["plp_cap_err_level"] = e5.plp_cap_err_level;
@@ -244,4 +249,30 @@ void ataPrintPs3SsdLog(const ps3_ssd_e4_log& e4, const ps3_ssd_e5_log& e5)
   jref5["power_on_hours_err_level"] = e5.power_on_hours_err_level;
   jref5["power_cycle_err_level"] = e5.power_cycle_err_level;
   jref5["lifetime_used_err_level"] = e5.lifetime_used_err_level;
+}
+
+/*
+ *  Prints the parsed PS3 SSD health log (GP Log 0xE4/0xE5) data
+ *  already present in the ps3_ssd_e4_log / ps3_ssd_e5_log structures.
+ *  Log data which was not read successfully is not printed.
+ *
+ *  @param  e4:  Constant reference to parsed detailed counters (const ps3_ssd_e4_log&)
+ *  @param  e5:  Constant reference to parsed health levels (const ps3_ssd_e5_log&)
+ *  @param  have_e4: true if the GP Log 0xE4 data is valid (bool)
+ *  @param  have_e5: true if the GP Log 0xE5 data is valid (bool)
+ */
+void ataPrintPs3SsdLog(const ps3_ssd_e4_log& e4, const ps3_ssd_e5_log& e5,
+                       bool have_e4, bool have_e5)
+{
+  jout("PS3 SSD Health Log (GP Log 0xe4/0xe5)\n");
+
+  if (have_e4) {
+    ps3_ssd_print_e4(e4);
+    ps3_ssd_print_e4_json(e4);
+  }
+
+  if (have_e5) {
+    ps3_ssd_print_e5(e5);
+    ps3_ssd_print_e5_json(e5);
+  }
 }

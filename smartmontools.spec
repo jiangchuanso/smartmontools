@@ -93,17 +93,37 @@ cat > %{buildroot}%{_sysconfdir}/smartd_warning.d/smart_curl_mail <<'SMART_CURL_
 # comma-separated -m address list and use /etc/smartd_warning.sh as the exec
 # script, e.g.:
 #
-#   -m @smart_curl_mail,admin@example.com -M exec /etc/smartd_warning.sh
+#   DEVICESCAN -m @smart_curl_mail -M exec /etc/smartd_warning.sh
+#
+# With this form the recipients are taken from SMARTD_MAIL_TO in
+# smart_curl_mail.conf and no local mailer is involved at all.
+#
+# Do NOT combine the plugin with a plain address while '-M exec' also points
+# to /etc/smartd_warning.sh: smartd_warning.sh removes only the '@plugin'
+# words from SMARTD_ADDRESS and then runs $SMARTD_MAILER for the remaining
+# addresses.  As $SMARTD_MAILER is the warning script itself in that case,
+# the script detects the recursion, exits with an error and smartd logs the
+# failure, even though the plugin already sent the mail.  If a plain address
+# is wanted in the -m Directive, point -M exec at a real mailer instead:
+#
+#   DEVICESCAN -m @smart_curl_mail,admin@example.com -M exec /usr/bin/mail
 #
 # The plugin is started by /etc/smartd_warning.sh and reads the message from
-# the environment variables SMARTD_ADDRESS, SMARTD_SUBJECT and
-# SMARTD_FULLMESSAGE (see 'man smartd.conf' / 'man smartd_warning.sh').
+# the environment variables SMARTD_ADDRESS, SMARTD_ADDRESS_ORIG,
+# SMARTD_SUBJECT and SMARTD_FULLMESSAGE (see 'man smartd.conf' /
+# 'man smartd_warning.sh').
 #
 # === Configuration ===
 # The plugin keeps NO SMTP configuration of its own.  All settings are read
 # from /etc/smartd_warning.d/smart_curl_mail.conf (see the template shipped
 # alongside this script).  The .conf file is required and must define at
 # least SMARTD_SMTP_URL and SMARTD_MAIL_FROM.
+#
+# Recipients are looked up in this order:
+#   1. SMARTD_ADDRESS      - plain addresses left over by smartd_warning.sh
+#   2. SMARTD_ADDRESS_ORIG - the original -m list without the '@plugin' words
+#   3. SMARTD_MAIL_TO      - from smart_curl_mail.conf
+# The plugin aborts if none of them provides an address.
 #
 # Example .conf contents for encryption / AUTH (adjust to your server):
 #   Implicit TLS (SMTPS, port 465):
@@ -132,8 +152,24 @@ if [ -z "$SMARTD_SMTP_URL" ] || [ -z "$SMARTD_MAIL_FROM" ]; then
   echo "$0: SMARTD_SMTP_URL and SMARTD_MAIL_FROM must not be empty" >&2
   exit 1
 fi
-if [ -z "$SMARTD_ADDRESS" ]; then
-  echo "$0: SMARTD_ADDRESS is empty - no recipients" >&2
+
+# Recipients: plain addresses of the -m Directive, else the original -m list
+# without the '@plugin' words, else SMARTD_MAIL_TO from the .conf file.
+addrs=$SMARTD_ADDRESS
+if [ -z "$addrs" ] && [ -n "$SMARTD_ADDRESS_ORIG" ]; then
+  for a in $SMARTD_ADDRESS_ORIG; do
+    case $a in
+      @*) ;;
+      *) addrs="${addrs}${addrs:+ }$a" ;;
+    esac
+  done
+fi
+if [ -z "$addrs" ]; then
+  addrs=$SMARTD_MAIL_TO
+fi
+if [ -z "$addrs" ]; then
+  echo "$0: no recipients - set SMARTD_MAIL_TO in $SMARTD_CONF" >&2
+  echo "$0: or add a plain address to the -m Directive in /etc/smartd.conf" >&2
   exit 1
 fi
 
@@ -157,7 +193,7 @@ trap 'rm -f "$tmp"' EXIT HUP INT TERM
 
 {
   printf 'From: <%%s>\n' "$SMARTD_MAIL_FROM"
-  for a in $SMARTD_ADDRESS; do
+  for a in $addrs; do
     printf 'To: <%%s>\n' "$a"
   done
   printf 'Subject: %%s\n' "$(rfc2047 "${SMARTD_SUBJECT:-SMART error detected}")"
@@ -173,11 +209,13 @@ trap 'rm -f "$tmp"' EXIT HUP INT TERM
 set -- --silent --show-error
 set -- "$@" --url "$SMARTD_SMTP_URL"
 set -- "$@" --mail-from "$SMARTD_MAIL_FROM"
-for a in $SMARTD_ADDRESS; do
+for a in $addrs; do
   set -- "$@" --mail-rcpt "$a"
 done
 if [ -n "$SMARTD_SMTP_AUTH_USER" ]; then
-  set -- "$@" --login "$SMARTD_SMTP_AUTH_USER" --password "$SMARTD_SMTP_AUTH_PASS"
+  # 'curl --user USER:PASS', curl picks the AUTH mechanism (LOGIN/PLAIN/...)
+  # supported by the server.  There is no '--login'/'--password' option.
+  set -- "$@" --user "$SMARTD_SMTP_AUTH_USER:$SMARTD_SMTP_AUTH_PASS"
 fi
 # shellcheck disable=SC2086
 set -- "$@" $SMARTD_CURL_OPTS
@@ -206,6 +244,12 @@ SMARTD_SMTP_URL='smtp://localhost:25'
 
 # Envelope and RFC 5322 'From:' address
 SMARTD_MAIL_FROM='smartd@localhost'
+
+# Recipients (space separated).  Only used when the -m Directive of
+# /etc/smartd.conf contains no plain address, e.g. '-m @smart_curl_mail'.
+# If -m lists a plain address (e.g. '-m @smart_curl_mail,admin@example.com')
+# that address is used and this setting is ignored.
+SMARTD_MAIL_TO='root@localhost'
 
 # SMTP AUTH (LOGIN/PLAIN) credentials - empty disables AUTH.
 # NOTE: this file may contain a plaintext password.  If you set the AUTH
@@ -254,6 +298,25 @@ chmod 644 %{buildroot}%{_sysconfdir}/smartd_warning.d/smart_curl_mail.conf
 %systemd_postun_with_restart smartd.service
 
 %changelog
+* Sun Aug 30 2026 smartmontools RPM maintainer <maintainer@example.com> - 8.0-2
+- smart_curl_mail: fix SMTP AUTH, 'curl --login/--password' does not exist and
+  made every authenticated run fail; use 'curl --user USER:PASS' instead.
+- smart_curl_mail: resolve the recipients from SMARTD_ADDRESS, then from
+  SMARTD_ADDRESS_ORIG (original -m list without the '@plugin' words), then from
+  the new SMARTD_MAIL_TO setting, so '-m @smart_curl_mail' works as documented.
+- smart_curl_mail: document that the plugin must not be combined with a plain
+  address while '-M exec' points to /etc/smartd_warning.sh (self recursion of
+  the warning script) and fix the '-M test' example in the READMEs.
+- smartctl -l ps3ssd: check the vendor signature of GP Log 0xE4 and refuse to
+  print values from a log page with an unknown layout.
+- smartctl -d ps3stor,N: fix the enclosure list, the count field is U16 as in
+  the vendor ps3lib 'Ps3LibEnclList_t' (PS3LIB_MAX_ENCL_NUM = 256), not U8.
+- smartctl -d ps3stor,N: do not report a failed SCSI passthrough as success.
+- smartctl -d ps3stor,N: validate N (0..127 inclusive) as documented in the man
+  page; keep '-d ps3stor' from pulling in all other scan types; reject '--scan'
+  types which are not supported; guard the ioctl SGL against >16 entries and
+  report TLV allocation failures instead of aborting the process.
+
 * Thu Aug 27 2026 smartmontools RPM maintainer <maintainer@example.com> - 8.0-1
 - Ship a new smartd_warning.d plugin 'smart_curl_mail' that sends smartd alert
   emails directly via SMTP using curl(1) (no local MTA required). Defaults to
