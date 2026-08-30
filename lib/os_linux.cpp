@@ -3829,7 +3829,9 @@ int linux_smart_interface::ps3stor_pd_add_list(int bus_no, smart_device_list &de
 int linux_smart_interface::ps3stor_pdlist_cmd(int bus_no, std::vector<uint16_t> &devidlist)
 {
   // get enclist and get devlsit for each encl
-  uint16_t enclcount = 0;
+  // The count field is U8 as in the vendor ps3lib 'Ps3LibEnclList_t'; this
+  // is sufficient for the supported enclosure counts.
+  uint8_t enclcount = 0;
   ps3stor_encl_list *encllist = nullptr; 
   std::unique_ptr<uint8_t[]> encllist_buf;
 
@@ -3837,9 +3839,6 @@ int linux_smart_interface::ps3stor_pdlist_cmd(int bus_no, std::vector<uint16_t> 
   if (PS3STOR_ERRNO_SUCCESS != ps3chn()->get_enclcount(bus_no, enclcount)) {
     return -1;
   }
-  if (enclcount > PS3STOR_MAX_ENCL_NUM)
-    enclcount = PS3STOR_MAX_ENCL_NUM;
-
 
   //2.get encl list
   if (enclcount > 0) {

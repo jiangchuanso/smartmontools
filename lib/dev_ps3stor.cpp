@@ -15,7 +15,7 @@ namespace smartmon {
 
 ps3stor_channel *ps3stor_channel::s_channel;
 
-ps3stor_errno ps3stor_channel::get_enclcount(unsigned hostid, uint16_t &enclcount)
+ps3stor_errno ps3stor_channel::get_enclcount(unsigned hostid, uint8_t &enclcount)
 {
   ps3stor_msg_info reqinfo{};
   reqinfo.length = sizeof(reqinfo);

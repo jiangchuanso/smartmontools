@@ -299,8 +299,12 @@ chmod 644 %{buildroot}%{_sysconfdir}/smartd_warning.d/smart_curl_mail.conf
 
 %changelog
 * Sun Aug 30 2026 smartmontools RPM maintainer <maintainer@example.com> - 8.0-2
-- smartctl -l ps3ssd: read the GP Log Directory even when 'ps3ssd' is the only
-  requested log (previously '-l ps3ssd' alone always reported 'not supported').
+- Remove the smartctl -l ps3ssd option: the SSD vendor log layout is not
+  covered by any vendor documentation and keeping a private CLI option would
+  add an upstream merge burden.  The help text, man page and README sections
+  are gone as well.
+- smartctl -d ps3stor,N: keep the enclosure list count field as U8 (255 max),
+  which is sufficient for the supported enclosure counts.
 - smartctl -d ps3stor,N: guard firecmd() against SGL entries > 16 (same fixed
   size SGL as firecmd_scsi).
 - smartctl -d ps3stor,N: only copy sense data when the sense buffer exists and
@@ -313,10 +317,6 @@ chmod 644 %{buildroot}%{_sysconfdir}/smartd_warning.d/smart_curl_mail.conf
 - smart_curl_mail: document that the plugin must not be combined with a plain
   address while '-M exec' points to /etc/smartd_warning.sh (self recursion of
   the warning script) and fix the '-M test' example in the READMEs.
-- smartctl -l ps3ssd: check the vendor signature of GP Log 0xE4 and refuse to
-  print values from a log page with an unknown layout.
-- smartctl -d ps3stor,N: fix the enclosure list, the count field is U16 as in
-  the vendor ps3lib 'Ps3LibEnclList_t' (PS3LIB_MAX_ENCL_NUM = 256), not U8.
 - smartctl -d ps3stor,N: do not report a failed SCSI passthrough as success.
 - smartctl -d ps3stor,N: validate N (0..127 inclusive) as documented in the man
   page; keep '-d ps3stor' from pulling in all other scan types; reject '--scan'

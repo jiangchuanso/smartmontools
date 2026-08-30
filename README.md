@@ -24,49 +24,6 @@ This program uses free code signing provided by [SignPath.io](https://signpath.i
 
 This fork adds the following commands and features on top of upstream smartmontools:
 
-### `smartctl -l ps3ssd` (ATA)
-
-Prints the SSD vendor health log used by SSDs in the PS3 storage controller
-scenario: the detailed reliability counters (GP Log 0xE4) and the per-counter
-health levels (GP Log 0xE5). The logs are read via standard ATA `READ LOG EXT`
-commands, so it works on SATA and SAT (USB bridge) devices without any vendor
-library.
-
-**Under a PS3Stor RAID controller** the SSD sits behind the controller and is
-not exposed as `/dev/sda`, so this option must be combined with the
-`-d ps3stor,N` device type and a `/dev/bus/M` device name
-(M = SCSI bus number, N = disk index on the controller, range 0..127):
-
-```sh
-# Read the PS3 SSD health log of disk 1 (index 1) behind controller /dev/bus/0
-smartctl -l ps3ssd -d ps3stor,1 /dev/bus/0
-
-# Show full info including the ps3ssd log
-smartctl -a -d ps3stor,1 /dev/bus/0 -l ps3ssd
-
-# List ps3stor devices that can be detected
-smartctl --scan
-```
-
-> Tip: N ranges from 0 to 127; with multiple controller cards the bus number
-> increments from 0 (1, 2, ...).
-
-On a directly attached SATA/SAT device it can also be used directly (smartctl
-auto-detects it as an ATA device):
-
-```sh
-smartctl -l ps3ssd /dev/sda
-```
-
-> **WARNING:** The log layout is vendor-specific and is **not** covered by the
-> documentation of the storage controller (which only describes the generic
-> SMART information of `ps3cli /cx /ex /sx show smart`); it is assumed to be
-> defined by the SSD vendor. `smartctl` therefore checks the vendor signature
-> of the log page and reports
-> `PS3 SSD log (GP Log 0xE4): unexpected vendor signature, log layout not
-> supported` instead of printing values from a page it cannot decode.
-> If it prints `not supported`, the drive does not expose GP Log 0xE4/0xE5.
-
 ### `smart_curl_mail` (smartd warning plugin)
 
 A `smartd_warning.d` plugin that sends `smartd` alert emails **directly via

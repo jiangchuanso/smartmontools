@@ -64,8 +64,6 @@ smartctl_SOURCES = \
         farmprint.h \
         nvmeprint.cpp \
         nvmeprint.h \
-        ps3ssdprint.cpp \
-        ps3ssdprint.h \
         scsiprint.cpp \
         scsiprint.h
 

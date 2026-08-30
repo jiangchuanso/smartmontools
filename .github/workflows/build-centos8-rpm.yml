@@ -144,8 +144,11 @@ jobs:
               # repoint the repos to vault.centos.org before installing anything.
               sed -i "s/mirrorlist/#mirrorlist/g; s|#baseurl=http://mirror.centos.org|baseurl=http://vault.centos.org|g" /etc/yum.repos.d/CentOS-Linux-*.repo || true
 
+              # 'curl' is required by the smartmontools RPM (Requires: curl for
+              # the smartd_warning.d/smart_curl_mail plugin); rpm -Uvh in the
+              # smoke test below would fail its dependency check without it.
               dnf -y install gcc-c++ make rpm-build gzip tar \
-                  systemd-devel systemd-rpm-macros
+                  systemd-devel systemd-rpm-macros curl
 
               mkdir -p /root/rpmbuild/{BUILD,RPMS,SRPMS,SOURCES,SPECS}
 

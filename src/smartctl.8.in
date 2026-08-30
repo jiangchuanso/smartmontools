@@ -1707,28 +1707,6 @@ metrics and values from Seagate's vendor-specific Field Access
 Reliability Metrics (FARM) log when used on a drive supporting FARM.
 ATA and SAS logs differ slightly.
 \fBWARNING: Some Seagate drives do not support FARM.\fP
-.Sp
-.I ps3ssd
-\- [ATA] prints the SSD vendor health log used by SSDs in the PS3
-storage controller scenario: the detailed reliability counters
-(GP Log 0xE4) and the per-counter health levels (GP Log 0xE5).
-The logs are read via standard ATA READ LOG EXT commands, so it works
-on SATA and SAT (USB bridge) devices without any vendor library.
-Under a PS3Stor RAID controller the SSD is behind the controller and is
-not exposed as /dev/sda, so this option must be combined with
-\*(Aq-d ps3stor,N\*(Aq (N = disk index, 0..127) and a /dev/bus/M device name:
-.br
-\fBsmartctl \-l ps3ssd \-d ps3stor,1 /dev/bus/0\fP
-.br
-\fBsmartctl \-a \-d ps3stor,1 /dev/bus/0 \-l ps3ssd\fP
-.br
-If the drive does not expose GP Log 0xE4/0xE5, the message
-\*(AqPS3 SSD Health Log (GP Log 0xe4/0xe5) not supported\*(Aq is printed.
-\fBWARNING: The log layout is vendor-specific. It is not covered by the
-documentation of the storage controller, so \fBsmartctl\fP checks the vendor
-signature of the log page and reports an error if the layout does not match,
-instead of printing values it cannot decode. Unsupported SSDs may still report
-meaningless values.\fP
 .TP
 .B \-v ID,FORMAT[:BYTEORDER][,NAME], \-\-vendorattribute=ID,FORMAT...
 [ATA only] Sets a vendor-specific raw value print FORMAT, an optional
