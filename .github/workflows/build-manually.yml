@@ -571,6 +571,10 @@ jobs:
     runs-on: ubuntu-latest
     # Cross build on Fedora is faster than the native build done by 'cygwin.yml'.
     # The recipes below are partly borrowed from Cygwin's own CI build.
+    # Follow upstream official CI: use 'fedora:latest' (same as smartmontools/smartmontools).
+    # The yselkowitz/cygwin COPR may lag behind a fresh Fedora release, so the retry loop
+    # below tolerates intermittent metadata fetch timeouts. If a new Fedora chroot is not
+    # yet available from COPR, simply re-run the job once it catches up.
     container: fedora:latest
 
     steps:
@@ -578,8 +582,15 @@ jobs:
         run: |
           dnf install -y make
           dnf install -y dnf-plugins-core
-          dnf copr enable -y yselkowitz/cygwin
-          dnf install -y cygwin64-gcc-c++
+          # Retry: the COPR metadata fetch can fail intermittently with timeouts.
+          for i in 1 2 3; do
+            if dnf copr enable -y yselkowitz/cygwin && \
+               dnf install -y cygwin64-gcc-c++; then
+              break
+            fi
+            echo "Attempt $i to install Cygwin cross-toolchain failed, retrying..." >&2
+            sleep 15
+          done
 
       - uses: actions/download-artifact@v8
         with:
