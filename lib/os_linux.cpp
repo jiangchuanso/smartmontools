@@ -2550,7 +2550,11 @@ bool linux_ps3stor_device::scsi_cmd(scsi_cmnd_io *iop)
     }
   }
   iop->scsi_status = scsirsp.entry.status;
-  memcpy(iop->sensep, scsirsp.entry.sensebuf, PS3STOR_MIN(iop->max_sense_len, sizeof(scsirsp.entry.sensebuf)));
+  // iop->sensep may be NULL and max_sense_len may be 0 (e.g. DXFER_NONE
+  // requests); memcpy() with a NULL destination is undefined behaviour even
+  // for a zero length, guard the copy like the other Linux backends do.
+  if (iop->sensep && iop->max_sense_len > 0)
+    memcpy(iop->sensep, scsirsp.entry.sensebuf, PS3STOR_MIN(iop->max_sense_len, sizeof(scsirsp.entry.sensebuf)));
   return true;
 }
 
@@ -4267,6 +4271,15 @@ ps3stor_errno linux_ps3stor_channel::firecmd(unsigned hostid, ps3stor_msg_info *
 
   const uint16_t inblk = (uint16_t)((insize + PS3STOR_SGL_SIZE -1) / PS3STOR_SGL_SIZE);
   const uint16_t outblk = (uint16_t)((acksize + PS3STOR_SGL_SIZE -1) / PS3STOR_SGL_SIZE);
+
+  // The ioctl packet carries a fixed-size SGL (packet.sgl[16]); writing
+  // beyond it would corrupt the stack.  The callers keep the payload below
+  // 16 * 4KiB SGL entries, so this should never trigger.
+  if (inblk + outblk > 16) {
+    set_err(EINVAL, strprintf("ps3stor: too many SGE entries (%u), maximum is 16",
+                              (unsigned)(inblk + outblk)).c_str());
+    return -1;
+  }
 
   ps3stor_ioctl_sync_cmd packet{};
   packet.hostid = (uint16_t)hostid;
