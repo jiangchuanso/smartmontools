@@ -152,6 +152,11 @@ ps3stor_errno ps3stor_channel::pd_scsi_passthrough(unsigned hostid, uint8_t eid,
                                                    uint8_t *&scsidata, const size_t scsilen)
 {
   // 1. scsi data align
+  if (scsilen > 0 && scsidata == nullptr) {
+    set_err(EINVAL, "linux_ps3stor_device::scsi_cmd: scsi data buffer is null.");
+    return -1;
+  }
+
   unsigned scsicount = scsilen / PS3STOR_SGL_SIZE;
   scsicount = (scsilen % PS3STOR_SGL_SIZE == 0) ? (scsicount) : ((scsicount + 1));
   ps3stor_data scsiblks[PS3STOR_SCSI_MAX_BLK_CNT] = {};
@@ -174,6 +179,13 @@ ps3stor_errno ps3stor_channel::pd_scsi_passthrough(unsigned hostid, uint8_t eid,
     scsiblks[i].pdata = scsi_buffers.back().get();
     scsiblks[i].size = size;
     scsireq.req.datalen += size;
+
+    // For host-to-device commands, the outgoing data must be copied into
+    // the SGL buffers before the ioctl, otherwise the device receives zeros.
+    if (scsireq.cmddir == PS3STOR_SCSI_CMD_DIR_FROM_HOST) {
+      unsigned datasize = scsilen - i * PS3STOR_SGL_SIZE;
+      memcpy(scsiblks[i].pdata, scsidata + i * PS3STOR_SGL_SIZE, PS3STOR_MIN(datasize, size));
+    }
   }
 
   scsireq.req.sgecount = (scsireq.req.datalen + PS3STOR_SCSI_BYTE_PER_CMD - 1) / PS3STOR_SCSI_BYTE_PER_CMD;
@@ -218,12 +230,14 @@ ps3stor_errno ps3stor_channel::pd_scsi_passthrough(unsigned hostid, uint8_t eid,
 
   // 4. copy and free memory
   memcpy(&scsirsp, rspinfo->body, sizeof(scsirsp));
-  for (unsigned i = 0; i < scsicount; i++) {
-    unsigned size = PS3STOR_SGL_SIZE;
-    if (i == scsicount - 1) {
-      size = scsilen - i * PS3STOR_SGL_SIZE;
+  if (scsireq.cmddir == PS3STOR_SCSI_CMD_DIR_TO_HOST) {
+    for (unsigned i = 0; i < scsicount; i++) {
+      unsigned size = PS3STOR_SGL_SIZE;
+      if (i == scsicount - 1) {
+        size = scsilen - i * PS3STOR_SGL_SIZE;
+      }
+      memcpy(scsidata + i * PS3STOR_SGL_SIZE, scsiblks[i].pdata, size);
     }
-    memcpy(scsidata + i * PS3STOR_SGL_SIZE, scsiblks[i].pdata, size);
   }
 
   free(scsireq_tlv);
