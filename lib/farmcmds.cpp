@@ -59,6 +59,13 @@ bool ataReadFarmLog(ata_device* device, ataFarmLog& farmLog, unsigned nsectors) 
   const size_t FARM_PAGE_SIZE = 16384;
   const size_t FARM_ATTRIBUTE_SIZE = 8;
   const size_t FARM_MAX_PAGES = 6;
+  // The FARM log is always 6 pages of 16384 bytes = 192 sectors; a wrong
+  // value from the log directory would desync the reads below (or overflow
+  // the 16384-byte page buffer).
+  const unsigned FARM_LOG_TOTAL_SECTORS = (unsigned)(FARM_PAGE_SIZE * FARM_MAX_PAGES / 512);
+  if (nsectors != FARM_LOG_TOTAL_SECTORS)
+    return device->set_err(EINVAL, "Read FARM Log: invalid number of sectors (%u), expected %u",
+                           nsectors, FARM_LOG_TOTAL_SECTORS);
   const size_t FARM_SECTOR_SIZE = FARM_PAGE_SIZE * FARM_MAX_PAGES / nsectors;
   const unsigned FARM_SECTORS_PER_PAGE = nsectors / FARM_MAX_PAGES;
   const size_t FARM_CURRENT_PAGE_DATA_SIZE[FARM_MAX_PAGES] = {
@@ -159,7 +166,7 @@ bool scsiIsSeagate(char* scsi_vendor) {
 bool scsiReadFarmLog(scsi_device* device, scsiFarmLog& farmLog) {
   const uint32_t LOG_RESP_LONG_LEN = ((62 * 256) + 252);
   const uint32_t GBUF_SIZE = 65532;
-  uint8_t gBuf[GBUF_SIZE];
+  uint8_t gBuf[GBUF_SIZE] = { };
   const size_t FARM_ATTRIBUTE_SIZE = 8;
   farmLog = { };
   if (0 != scsiLogSense(device, SEAGATE_FARM_LPAGE, SEAGATE_FARM_CURRENT_L_SPAGE, gBuf, LOG_RESP_LONG_LEN, 0))
@@ -169,6 +176,11 @@ bool scsiReadFarmLog(scsi_device* device, scsiFarmLog& farmLog) {
   farmLog.pageHeader.pageCode = gBuf[0];
   farmLog.pageHeader.subpageCode = gBuf[1];
   farmLog.pageHeader.pageLength = gBuf[2] << 8 | gBuf[3];
+  // The page length is device-provided; reject values that would make the
+  // loop below read past the end of gBuf.
+  if (farmLog.pageHeader.pageLength + sizeof(scsiFarmPageHeader) + FARM_ATTRIBUTE_SIZE > GBUF_SIZE)
+    return device->set_err(EIO, "FARM log page length is invalid (pageLength=%u)",
+                           (unsigned)farmLog.pageHeader.pageLength);
   // Get rest of log
   // Holds data for each SCSI parameter
   uint64_t currentParameter[sizeof(gBuf) / FARM_ATTRIBUTE_SIZE] = { };
@@ -176,6 +188,8 @@ bool scsiReadFarmLog(scsi_device* device, scsiFarmLog& farmLog) {
   unsigned currentMetricIndex = 0;
   // Track offset (in struct) of current SCSI parameter
   unsigned currentParameterOffset = 0;
+  // Track offset (in gBuf) of the data area of the current parameter
+  unsigned currentParameterDataStart = 0;
   // Track offset in struct
   scsiFarmParameterHeader currentParameterHeader;
   for (unsigned pageOffset = sizeof(scsiFarmPageHeader);
@@ -261,12 +275,21 @@ bool scsiReadFarmLog(scsi_device* device, scsiFarmLog& farmLog) {
       if (currentParameterHeader.parameterCode >= 0x83) {
         currentParameterOffset += sizeof(scsiFarmByActuatorReallocation);
       }
+      // Skip unknown parameter codes; mapping them onto the struct below
+      // would write past the end of farmLog (parameter 0x83 already ends
+      // exactly at the end of the struct).
+      if (currentParameterHeader.parameterCode > 0x83) {
+        pageOffset += sizeof(scsiFarmParameterHeader) + currentParameterHeader.parameterLength - FARM_ATTRIBUTE_SIZE;
+        continue;
+      }
       // Copy parameter header to struct
       memcpy(reinterpret_cast<char*>(&farmLog) + currentParameterOffset,
              &currentParameterHeader,
              sizeof(scsiFarmParameterHeader));
       // Fix offset
       pageOffset += sizeof(scsiFarmParameterHeader);
+      // Remember where the data area of this parameter starts
+      currentParameterDataStart = pageOffset;
       // No longer setting header
       isParameterHeader = false;
       currentMetricIndex = 0;
@@ -280,7 +303,7 @@ bool scsiReadFarmLog(scsi_device* device, scsiFarmLog& farmLog) {
     if (currentMetric >> 56 == 0xC0) {
       currentMetric &= 0x00FFFFFFFFFFFFFFULL;
       // Parameter 0 is the log header, so check the log signature to verify this is a FARM log
-      if (pageOffset == sizeof(scsiFarmPageHeader)) {
+      if (pageOffset == sizeof(scsiFarmPageHeader) + sizeof(scsiFarmParameterHeader)) {
         if (currentMetric != 0x00004641524D4552)
           return device->set_err(EIO, "FARM log header is invalid (log signature=0x%" PRIx64 ")", currentMetric);
       }
@@ -288,11 +311,17 @@ bool scsiReadFarmLog(scsi_device* device, scsiFarmLog& farmLog) {
     } else if (currentParameterHeader.parameterLength <= currentMetricIndex * FARM_ATTRIBUTE_SIZE) {
       // Apply header for NEXT parameter
       isParameterHeader = true;
-      pageOffset -= FARM_ATTRIBUTE_SIZE;
+      // Jump to the real end of this parameter so that the next iteration
+      // (which adds FARM_ATTRIBUTE_SIZE) starts exactly at the next header.
+      pageOffset = currentParameterDataStart + currentParameterHeader.parameterLength - FARM_ATTRIBUTE_SIZE;
       // Copy data for CURRENT parameter to struct (skip parameter header which has already been assigned)
+      size_t copylen = currentParameterHeader.parameterLength;
+      const size_t maxcopy = sizeof(farmLog) - currentParameterOffset - sizeof(scsiFarmParameterHeader);
+      if (copylen > maxcopy)
+        copylen = maxcopy;
       memcpy(reinterpret_cast<char*>(&farmLog) + currentParameterOffset + sizeof(scsiFarmParameterHeader),
              currentParameter,
-             currentParameterHeader.parameterLength);
+             copylen);
       continue;
     } else {
       currentMetric = 0;

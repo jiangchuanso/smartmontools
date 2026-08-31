@@ -2474,8 +2474,10 @@ bool linux_ps3stor_device::scsi_pass_through(scsi_cmnd_io *iop)
         lib_printf("%s", buff);
   }
 
-  if (iop->cmnd[0] == 0x00)
+  if (iop->cmnd[0] == 0x00) {
+    iop->scsi_status = 0; // Fake good status for Test Unit Ready
     return true;
+  }
 
   return scsi_cmd(iop);
 }
@@ -2483,8 +2485,10 @@ bool linux_ps3stor_device::scsi_pass_through(scsi_cmnd_io *iop)
 bool linux_ps3stor_device::scsi_cmd(scsi_cmnd_io *iop)
 {
   // Controller rejects Test Unit Ready
-  if (iop->cmnd[0] == 0x00)
+  if (iop->cmnd[0] == 0x00) {
+    iop->scsi_status = 0;
     return true;
+  }
 
   if (iop->cmnd[0] == SAT_ATA_PASSTHROUGH_12 || iop->cmnd[0] == SAT_ATA_PASSTHROUGH_16) {
     // Controller does not return ATA output registers in SAT sense data
@@ -2547,6 +2551,11 @@ bool linux_ps3stor_device::scsi_cmd(scsi_cmnd_io *iop)
           return set_err((errno ? errno : EIO), "linux_ps3stor_device::scsi_cmd result: %u.%u = %d/%hhu",
                       m_host, m_did, errno, scsi_status);
         }
+        // Report the underrun via resid instead of the pseudo status
+        iop->scsi_status = 0;
+        if (iop->dxfer_dir == DXFER_FROM_DEVICE && scsirsp.entry.xfercnt <= (unsigned)iop->dxfer_len)
+          iop->resid = iop->dxfer_len - (int)scsirsp.entry.xfercnt;
+        return true;
     }
   }
   iop->scsi_status = scsirsp.entry.status;
