@@ -22,10 +22,19 @@ name: Build CentOS 8 RPMs (smartmontools)
 #
 # Layout (borrowed from build.yml / build-manually.yml):
 #   - 'make-src-tgz' creates the release tarball with 'make dist' and exports
-#     the version information (SMARTMONTOOLS_PKG_VER, GIT_VER_FNAME and
-#     SOURCE_DATE_EPOCH) to the RPM jobs via job outputs.
+#     the version information (SMARTMONTOOLS_PKG_VER, GIT_VER_FNAME,
+#     GIT_VER_NO_HASH and SOURCE_DATE_EPOCH) to the RPM jobs via job outputs.
 #   - 'build-rpm' consumes that tarball inside a CentOS 8 container, so the
 #     version number never has to be hard-coded in the workflow.
+#
+# Version string:
+#   build.yml creates releases tagged 'smartmontools-<git-ver>', where
+#   SMARTMONTOOLS_GIT_VER_FNAME is e.g. "8.0-598-gc4dc2b7a5769" (pre-release)
+#   or "8.0" (release). To keep the RPM version string identical to that tag
+#   while dropping the git hash suffix, the workflow also exports
+#   SMARTMONTOOLS_GIT_VER_NO_HASH (e.g. "8.0-598"). RPM does not allow '-'
+#   in Version/Release, so the numeric commit part is used as the RPM Release
+#   field, yielding e.g. smartmontools-8.0-598.el8.<arch>.rpm.
 
 on:
   release:
@@ -43,6 +52,7 @@ jobs:
       SOURCE_DATE_EPOCH: ${{ steps.set-env.outputs.SOURCE_DATE_EPOCH }}
       SMARTMONTOOLS_PKG_VER: ${{ steps.set-env.outputs.SMARTMONTOOLS_PKG_VER }}
       SMARTMONTOOLS_GIT_VER_FNAME: ${{ steps.set-env.outputs.SMARTMONTOOLS_GIT_VER_FNAME }}
+      SMARTMONTOOLS_GIT_VER_NO_HASH: ${{ steps.set-env.outputs.SMARTMONTOOLS_GIT_VER_NO_HASH }}
 
     steps:
       - uses: actions/checkout@v6
@@ -69,9 +79,14 @@ jobs:
         run: |
           version_sh=$(util/getversion.sh -s) && eval "${version_sh}" &&
           SOURCE_DATE_EPOCH=$((SMARTMONTOOLS_GIT_REV_EPOCH + 1)) &&
+          # build.yml derives its release tag from SMARTMONTOOLS_GIT_VER_FNAME
+          # (e.g. "8.0-598-gc4dc2b7a5769"). Derive the same version without the
+          # git hash suffix (-g<REV>), e.g. "8.0-598", for the RPM release tag.
+          GIT_VER_NO_HASH=${SMARTMONTOOLS_GIT_VER_FNAME%-g*} &&
           echo SOURCE_DATE_EPOCH=${SOURCE_DATE_EPOCH} >> $GITHUB_ENV &&
           echo SMARTMONTOOLS_PKG_VER=${SMARTMONTOOLS_PKG_VER} >> $GITHUB_ENV &&
           echo SMARTMONTOOLS_GIT_VER_FNAME=${SMARTMONTOOLS_GIT_VER_FNAME} >> $GITHUB_ENV &&
+          echo SMARTMONTOOLS_GIT_VER_NO_HASH=${GIT_VER_NO_HASH} >> $GITHUB_ENV &&
           cat $GITHUB_ENV | tee $GITHUB_OUTPUT
 
       - name: Creating src.tar.gz
@@ -104,6 +119,7 @@ jobs:
     env:
       SOURCE_DATE_EPOCH: ${{ needs.make-src-tgz.outputs.SOURCE_DATE_EPOCH }}
       SMARTMONTOOLS_PKG_VER: ${{ needs.make-src-tgz.outputs.SMARTMONTOOLS_PKG_VER }}
+      SMARTMONTOOLS_GIT_VER_NO_HASH: ${{ needs.make-src-tgz.outputs.SMARTMONTOOLS_GIT_VER_NO_HASH }}
 
     steps:
       - name: Checkout source
@@ -137,6 +153,7 @@ jobs:
           docker run --rm --platform "$PLATFORM" \
             -e SOURCE_DATE_EPOCH \
             -e SMARTMONTOOLS_PKG_VER \
+            -e SMARTMONTOOLS_GIT_VER_NO_HASH \
             -v "$PWD":/src -w /src centos:8 \
             bash -c '
               set -ex
@@ -161,10 +178,26 @@ jobs:
               # Build the RPM. "dist .el8" pins the release tag; the version
               # is taken from configure.ac (--define below) so spec and
               # configure.ac can never drift apart.
+              #
+              # Derive the RPM Release from SMARTMONTOOLS_GIT_VER_NO_HASH (the
+              # version build.yml uses for its release tag minus the git hash,
+              # e.g. "8.0-598"). RPM does not allow '-' in Version/Release, so
+              # only the numeric commit part goes into the Release field:
+              # "598" -> smartmontools-8.0-598.el8.<arch>.rpm. A plain release
+              # version (no "-NNN" part) keeps the spec file default.
+              rel=
+              case "${SMARTMONTOOLS_GIT_VER_NO_HASH}" in
+                *-*) rel=${SMARTMONTOOLS_GIT_VER_NO_HASH##*-} ;;
+              esac
+              case "$rel" in
+                ''|*[!0-9]*) rel= ;;
+              esac
+
               rpmbuild -bb \
                 --define "_topdir /root/rpmbuild" \
                 --define "dist .el8" \
                 --define "version ${SMARTMONTOOLS_PKG_VER}" \
+                ${rel:+--define "release ${rel}"} \
                 /src/smartmontools.spec
 
               # Copy the RPM(s) back to the workspace
