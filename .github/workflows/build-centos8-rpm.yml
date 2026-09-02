@@ -190,7 +190,7 @@ jobs:
                 *-*) rel=${SMARTMONTOOLS_GIT_VER_NO_HASH##*-} ;;
               esac
               case "$rel" in
-                ''|*[!0-9]*) rel= ;;
+                *[!0-9]*) rel= ;;
               esac
 
               rpmbuild -bb \
