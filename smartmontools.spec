@@ -7,18 +7,27 @@
 # for x86_64 and aarch64.  The workflow creates the source tarball with
 # 'make dist' and copies it to the rpmbuild SOURCES directory.
 #
-# NOTE: The build workflow (.github/workflows/build-centos8-rpm.yml) passes
-#       '--define "version ..."' to rpmbuild, so the effective version always
-#       matches 'AC_INIT([smartmontools],[X.Y],...)' in configure.ac even if
-#       the 'Version:' field below is not updated. Still keep 'Version:' in
-#       sync with configure.ac (currently 8.0) for manual builds.
+# NOTE: Version and Release below are macro based on purpose.
+#       'rpmbuild --define' only defines macros, it does NOT override literal
+#       'Version:'/'Release:' lines - a literal value in the spec file always
+#       wins and would silently pin the package to an outdated version.
+#       The build workflow (.github/workflows/build-centos8-rpm.yml) therefore
+#       passes '--define "pkgver <version-from-configure.ac>"' and
+#       '--define "rpmrel <commit-counter>"', so the package version always
+#       matches the release tag created by build.yml. The values below are
+#       only fallbacks for a manual local build.
+#
+#       Rpm does not allow '-' inside Version/Release, so the git version
+#       "8.0-610-gHASH" is split into Version "8.0" + Release "610", which
+#       yields smartmontools-8.0-610.el8.<arch>.rpm for the release tag
+#       smartmontools-8.0-610-gHASH.
 #
 
 %global debug_package %{nil}
 
 Name:           smartmontools
-Version:        8.0
-Release:        2%{?dist}
+Version:        %{?pkgver}%{!?pkgver:8.0}
+Release:        %{?rpmrel}%{!?rpmrel:2}%{?dist}
 Summary:        Control and monitor storage systems using S.M.A.R.T.
 
 License:        GPL-2.0-or-later
