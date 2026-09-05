@@ -305,8 +305,28 @@ jobs:
           path: artifacts/smartmontools-cygwin-${{ needs.make-src-tgz.outputs.SMARTMONTOOLS_GIT_VER_FNAME }}.tar.gz
           retention-days: 1
 
+  build-rpm-el8:
+    # Build the el8 RPMs from the very same source tarball and the very same
+    # version information as every other artifact of this run.
+    # The reusable workflow uploads the RPMs as artifacts only; they are
+    # published together with everything else by 'publish-artifacts' below.
+    name: Build el8 RPMs
+    needs: make-src-tgz
+    # The aarch64 build runs under QEMU and is slow, so skip it for pull
+    # requests and do not let a failure block the release.
+    if: github.event_name != 'pull_request'
+    continue-on-error: true
+    uses: ./.github/workflows/build-centos8-rpm.yml
+    with:
+      pkg_ver: ${{ needs.make-src-tgz.outputs.SMARTMONTOOLS_PKG_VER }}
+      git_ver_fname: ${{ needs.make-src-tgz.outputs.SMARTMONTOOLS_GIT_VER_FNAME }}
+      source_date_epoch: ${{ needs.make-src-tgz.outputs.SOURCE_DATE_EPOCH }}
+
   publish-artifacts:
     # Publish all built artifacts to a GitHub Release on THIS repository.
+    # 'merge-multiple: true' below merges EVERY artifact of this run, so the
+    # tar.gz, the static binaries, dmg, exe, cygwin tarball and the el8 RPMs
+    # all end up in one single release with one single version number.
     # Runs only on pushes to 'main' of this repo.
     if: ${{ github.ref == 'refs/heads/main' }}
     env:
@@ -322,6 +342,7 @@ jobs:
       - compile-freebsd
       - compile-windows
       - compile-cygwin
+      - build-rpm-el8
     runs-on: ubuntu-latest
     # 'contents: write' is required for the default GITHUB_TOKEN to create
     # releases and tags.

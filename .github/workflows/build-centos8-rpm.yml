@@ -1,101 +1,109 @@
-name: Build CentOS 8 RPMs (smartmontools)
+name: Build el8 RPMs
 
-# Publishes CentOS 8 (el8) RPMs for both x86_64 and aarch64 and attaches them
-# to the SAME release that 'build.yml' creates on push to main (tag
-# 'smartmontools-<git-ver>'). The binary is built *inside* a CentOS 8 container,
-# so it links against the CentOS 8 glibc and is guaranteed runtime-compatible.
+# Builds CentOS 8 (el8) RPMs for x86_64 and aarch64 from the 'make dist'
+# source tarball, inside a CentOS 8 container, so the binaries link against
+# the el8 glibc and are guaranteed runtime-compatible.
 #
-# Trigger:
-#   - 'release: released' -> fired when a prerelease is promoted to a full
-#     release (e.g. build.yml creates a --prerelease, then it is promoted via
-#     the UI or `gh release edit --prerelease=false`). The RPMs are attached to
-#     that very release at promotion time.
-#   - 'release: published' -> covers the case where build.yml creates a full
-#     (non-prerelease) release directly.
-#   - Manual run via workflow_dispatch (RPMs are built and attached to the
-#     matching release if one exists, otherwise only uploaded as artifacts).
+# This is a REUSABLE workflow. It is called by 'build.yml' directly after the
+# 'make-src-tgz' job, so the RPMs are built from the very same source tarball
+# and the very same version information that 'build.yml' uses for every other
+# artifact and for the release tag:
 #
-# NOTE: to keep the RPM version string identical to the release tag produced by
-# build.yml, both checkout steps below use the release's target commit
-# (github.event.release.target_commitish). Otherwise two different releases
-# would be created.
+#   build.yml:make-src-tgz  --(version passed as input)-->  this workflow
+#                                                              |
+#                                                        RPM artifacts
+#                                                              |
+#   build.yml:publish-artifacts  <--(merge-multiple)------------+
+#            creates ONE release containing tarball, static binaries,
+#            dmg, exe, cygwin tar.gz and the el8 RPMs
 #
-# Layout (borrowed from build.yml / build-manually.yml):
-#   - 'make-src-tgz' creates the release tarball with 'make dist' and exports
-#     the version information (SMARTMONTOOLS_PKG_VER, GIT_VER_FNAME,
-#     GIT_VER_NO_HASH and SOURCE_DATE_EPOCH) to the RPM jobs via job outputs.
-#   - 'build-rpm' consumes that tarball inside a CentOS 8 container, so the
-#     version number never has to be hard-coded in the workflow.
+# The version is never re-computed and never parsed back from a release tag,
+# so it cannot drift apart from the release. The RPMs are only uploaded as
+# artifacts here; the release itself is created once by 'publish-artifacts'.
+#
+# Manual runs (workflow_dispatch) are still possible, e.g. to rebuild the RPMs
+# for an existing release. In that case the version is computed locally with
+# 'util/getversion.sh' and the RPMs are only uploaded as artifacts, unless a
+# release tag is given in 'attach_tag'.
 #
 # Version string:
-#   build.yml creates releases tagged 'smartmontools-<git-ver>', where
-#   SMARTMONTOOLS_GIT_VER_FNAME is e.g. "8.0-598-gc4dc2b7a5769" (pre-release)
-#   or "8.0" (release). To keep the RPM version string identical to that tag
-#   while dropping the git hash suffix, the workflow also exports
-#   SMARTMONTOOLS_GIT_VER_NO_HASH (e.g. "8.0-598"). RPM does not allow '-'
-#   in Version/Release, so the numeric commit part is used as the RPM Release
-#   field, yielding e.g. smartmontools-8.0-598.el8.<arch>.rpm.
+#   Version: SMARTMONTOOLS_PKG_VER from configure.ac, e.g. "8.0".
+#   Release: the commit counter of SMARTMONTOOLS_GIT_VER_FNAME, the version
+#            string build.yml uses for its release tag, e.g. "8.0-610-gHASH"
+#            -> Release "610" -> smartmontools-8.0-610.el8.<arch>.rpm, which
+#            matches the release tag "smartmontools-8.0-610-gHASH".
+#            RPM does not allow '-' inside Version/Release, that is why only
+#            the numeric part is used. A plain release version (no "-NNN"
+#            counter) keeps the default from smartmontools.spec.
 
 on:
-  release:
-    types: [released, published]
+  workflow_call:
+    inputs:
+      pkg_ver:
+        description: 'SMARTMONTOOLS_PKG_VER of the calling run, e.g. 8.0'
+        required: true
+        type: string
+      git_ver_fname:
+        description: 'SMARTMONTOOLS_GIT_VER_FNAME of the calling run, e.g. 8.0-610-gHASH'
+        required: true
+        type: string
+      source_date_epoch:
+        description: 'SOURCE_DATE_EPOCH of the calling run'
+        required: true
+        type: string
+      attach_tag:
+        description: 'Optional: attach the RPMs to this existing release tag'
+        required: false
+        type: string
+        default: ''
   workflow_dispatch:
+    inputs:
+      ref:
+        description: 'Git ref to build (branch, tag or SHA)'
+        required: false
+        type: string
+        default: main
+      attach_tag:
+        description: 'Optional: attach the RPMs to this existing release tag'
+        required: false
+        type: string
+        default: ''
 
 permissions:
-  contents: write   # needed to attach assets to the release
+  contents: read
 
 jobs:
+  # Only used for manual runs: when called by build.yml, the source tarball of
+  # the 'make-src-tgz' job of that run is reused instead.
   make-src-tgz:
-    name: Create smartmontools dist
+    name: Create source tarball (manual run)
+    if: ${{ !inputs.pkg_ver }}
     runs-on: ubuntu-latest
-    outputs:
-      SOURCE_DATE_EPOCH: ${{ steps.set-env.outputs.SOURCE_DATE_EPOCH }}
-      SMARTMONTOOLS_PKG_VER: ${{ steps.set-env.outputs.SMARTMONTOOLS_PKG_VER }}
-      SMARTMONTOOLS_GIT_VER_FNAME: ${{ steps.set-env.outputs.SMARTMONTOOLS_GIT_VER_FNAME }}
-      SMARTMONTOOLS_GIT_VER_NO_HASH: ${{ steps.set-env.outputs.SMARTMONTOOLS_GIT_VER_NO_HASH }}
-
     steps:
       - uses: actions/checkout@v6
         with:
-          # Check out the release's target commit so the version string matches
-          # the tag that build.yml created (otherwise a different tag -> a
-          # second, unwanted release would be created).
-          ref: ${{ github.event.release.target_commitish || github.sha }}
+          ref: ${{ inputs.ref || github.sha }}
           # smartmontools computes its version string from the git log
           # (util/getversion.sh). This is a pre-release build
           # (smartmontools_release_date is empty in configure.ac), so
           # getversion.sh needs the smartmontools 7.5 base revision
           # (943adaeda55c2d534c722fe66c6b4613a782caa1) to compute the emulated
           # svn revision and the pre-release commit counter. A shallow clone
-          # (e.g. fetch-depth: 3500) would miss it because this fork has more
-          # than 3500 commits, silently producing version strings like
-          # "8.0-gREV" without the commit count. Use a full clone instead.
+          # would miss it, silently producing version strings like "8.0-gREV"
+          # without the commit count. Use a full clone instead.
           fetch-depth: 0
           # Include (future) release tags for 'getversion.sh'
           fetch-tags: true
 
-      - name: Setting environment variables
-        id: set-env
-        run: |
-          version_sh=$(util/getversion.sh -s) && eval "${version_sh}" &&
-          SOURCE_DATE_EPOCH=$((SMARTMONTOOLS_GIT_REV_EPOCH + 1)) &&
-          # build.yml derives its release tag from SMARTMONTOOLS_GIT_VER_FNAME
-          # (e.g. "8.0-598-gc4dc2b7a5769"). Derive the same version without the
-          # git hash suffix (-g<REV>), e.g. "8.0-598", for the RPM release tag.
-          GIT_VER_NO_HASH=${SMARTMONTOOLS_GIT_VER_FNAME%-g*} &&
-          echo SOURCE_DATE_EPOCH=${SOURCE_DATE_EPOCH} >> $GITHUB_ENV &&
-          echo SMARTMONTOOLS_PKG_VER=${SMARTMONTOOLS_PKG_VER} >> $GITHUB_ENV &&
-          echo SMARTMONTOOLS_GIT_VER_FNAME=${SMARTMONTOOLS_GIT_VER_FNAME} >> $GITHUB_ENV &&
-          echo SMARTMONTOOLS_GIT_VER_NO_HASH=${GIT_VER_NO_HASH} >> $GITHUB_ENV &&
-          cat $GITHUB_ENV | tee $GITHUB_OUTPUT
-
       - name: Creating src.tar.gz
         run: |
+          version_sh=$(util/getversion.sh -s) && eval "${version_sh}" &&
+          export SOURCE_DATE_EPOCH=$((SMARTMONTOOLS_GIT_REV_EPOCH + 1)) &&
           util/git-set-mtime.sh -f -q &&
           ./autogen.sh --force &&
           mkdir build && cd build &&
           ../configure SOURCE_DATE_EPOCH=${SOURCE_DATE_EPOCH} &&
-          make dist && tar -tvzf "smartmontools-${SMARTMONTOOLS_PKG_VER}.tar.gz"
+          make dist
 
       - uses: actions/upload-artifact@v7
         with:
@@ -106,7 +114,13 @@ jobs:
   build-rpm:
     name: Build RPM for ${{ matrix.arch }}
     needs: make-src-tgz
+    # 'make-src-tgz' is skipped when called by build.yml (the tarball of that
+    # run is reused), so both 'success' and 'skipped' are fine here.
+    if: ${{ !cancelled() && (needs.make-src-tgz.result == 'success' || needs.make-src-tgz.result == 'skipped') }}
     runs-on: ubuntu-latest
+    # 'contents: write' is only needed by the optional 'attach' step below.
+    permissions:
+      contents: write
     strategy:
       fail-fast: false
       matrix:
@@ -116,22 +130,16 @@ jobs:
           - arch: aarch64
             platform: linux/arm64
 
-    env:
-      SOURCE_DATE_EPOCH: ${{ needs.make-src-tgz.outputs.SOURCE_DATE_EPOCH }}
-      SMARTMONTOOLS_PKG_VER: ${{ needs.make-src-tgz.outputs.SMARTMONTOOLS_PKG_VER }}
-      SMARTMONTOOLS_GIT_VER_NO_HASH: ${{ needs.make-src-tgz.outputs.SMARTMONTOOLS_GIT_VER_NO_HASH }}
-
     steps:
       - name: Checkout source
         uses: actions/checkout@v6
         with:
-          # Check out the release's target commit so the spec/version matches
-          # the tag created by build.yml.
-          ref: ${{ github.event.release.target_commitish || github.sha }}
-          # Only the spec file is needed to build the RPM; the version
-          # information comes from the release tarball of the 'make-src-tgz'
-          # job, so a single commit is sufficient.
-          fetch-depth: 1
+          ref: ${{ inputs.ref || github.sha }}
+          # When called by build.yml only 'smartmontools.spec' is needed: the
+          # version comes from the inputs. A manual run computes the version
+          # with util/getversion.sh and therefore needs the full history.
+          fetch-depth: ${{ inputs.pkg_ver && 1 || 0 }}
+          fetch-tags: true
 
       - name: Set up QEMU (aarch64 only)
         if: matrix.arch == 'aarch64'
@@ -139,10 +147,49 @@ jobs:
         with:
           platforms: arm64
 
+      - name: Resolve version information
+        env:
+          IN_PKG_VER: ${{ inputs.pkg_ver }}
+          IN_GIT_VER_FNAME: ${{ inputs.git_ver_fname }}
+          IN_SOURCE_DATE_EPOCH: ${{ inputs.source_date_epoch }}
+        run: |
+          set -eu
+          if [ -n "${IN_PKG_VER}" ]; then
+            # Called by build.yml: reuse its version information unchanged.
+            PKG_VER=${IN_PKG_VER}
+            GIT_VER_FNAME=${IN_GIT_VER_FNAME}
+            SOURCE_DATE_EPOCH=${IN_SOURCE_DATE_EPOCH}
+          else
+            # Manual run: compute the version from the checked out commit with
+            # the very same script build.yml uses.
+            version_sh=$(util/getversion.sh -s) && eval "${version_sh}"
+            PKG_VER=${SMARTMONTOOLS_PKG_VER}
+            GIT_VER_FNAME=${SMARTMONTOOLS_GIT_VER_FNAME}
+            SOURCE_DATE_EPOCH=$((SMARTMONTOOLS_GIT_REV_EPOCH + 1))
+          fi
+          # "8.0-610-gHASH" -> "8.0-610" -> RPM Release "610"
+          GIT_VER_NO_HASH=${GIT_VER_FNAME%-g*}
+          rel=
+          case "${GIT_VER_NO_HASH}" in
+            *-*) rel=${GIT_VER_NO_HASH##*-} ;;
+          esac
+          case "$rel" in
+            *[!0-9]*) rel= ;;
+          esac
+          {
+            echo PKG_VER=${PKG_VER}
+            echo GIT_VER_FNAME=${GIT_VER_FNAME}
+            echo GIT_VER_NO_HASH=${GIT_VER_NO_HASH}
+            echo SOURCE_DATE_EPOCH=${SOURCE_DATE_EPOCH}
+            echo RPM_RELEASE=${rel}
+          } | tee -a $GITHUB_ENV
+
       - name: Download source tarball
         uses: actions/download-artifact@v8
         with:
-          name: smartmontools-src
+          # build.yml uploads its tarball as 'artifacts', a manual run as
+          # 'smartmontools-src' (see the 'make-src-tgz' job above).
+          name: ${{ inputs.pkg_ver && 'artifacts' || 'smartmontools-src' }}
           path: artifacts
 
       - name: Build RPM in CentOS 8 container
@@ -151,9 +198,8 @@ jobs:
         run: |
           set -eux
           docker run --rm --platform "$PLATFORM" \
-            -e SOURCE_DATE_EPOCH \
-            -e SMARTMONTOOLS_PKG_VER \
-            -e SMARTMONTOOLS_GIT_VER_NO_HASH \
+            -e PKG_VER -e GIT_VER_FNAME -e GIT_VER_NO_HASH \
+            -e RPM_RELEASE -e SOURCE_DATE_EPOCH \
             -v "$PWD":/src -w /src centos:8 \
             bash -c '
               set -ex
@@ -161,44 +207,38 @@ jobs:
               # repoint the repos to vault.centos.org before installing anything.
               sed -i "s/mirrorlist/#mirrorlist/g; s|#baseurl=http://mirror.centos.org|baseurl=http://vault.centos.org|g" /etc/yum.repos.d/CentOS-Linux-*.repo || true
 
-              # 'curl' is required by the smartmontools RPM (Requires: curl for
-              # the smartd_warning.d/smart_curl_mail plugin); rpm -Uvh in the
+              # "curl" is required by the smartmontools RPM (Requires: curl for
+              # the smartd_warning.d/smart_curl_mail plugin); the "rpm -Uvh"
               # smoke test below would fail its dependency check without it.
               dnf -y install gcc-c++ make rpm-build gzip tar \
                   systemd-devel systemd-rpm-macros curl
 
               mkdir -p /root/rpmbuild/{BUILD,RPMS,SRPMS,SOURCES,SPECS}
 
-              # Install the release tarball into the rpmbuild SOURCES dir.
-              # The version number comes from configure.ac (exported by the
-              # make-src-tgz job), so it cannot go stale.
-              cp -v /src/artifacts/smartmontools-${SMARTMONTOOLS_PKG_VER}.tar.gz \
-                    /root/rpmbuild/SOURCES/
+              # Install the source tarball into the rpmbuild SOURCES dir. The
+              # file name differs between build.yml ("smartmontools-<git-ver>
+              # .tar.gz") and a manual run ("smartmontools-<pkg-ver>.tar.gz"),
+              # while rpmbuild expects "%{name}-%{version}.tar.gz" as Source0,
+              # so normalise the name here.
+              cp -v /src/artifacts/smartmontools-*.tar.gz \
+                    /root/rpmbuild/SOURCES/smartmontools-${PKG_VER}.tar.gz
 
-              # Build the RPM. "dist .el8" pins the release tag; the version
-              # is taken from configure.ac (--define below) so spec and
-              # configure.ac can never drift apart.
-              #
-              # Derive the RPM Release from SMARTMONTOOLS_GIT_VER_NO_HASH (the
-              # version build.yml uses for its release tag minus the git hash,
-              # e.g. "8.0-598"). RPM does not allow '-' in Version/Release, so
-              # only the numeric commit part goes into the Release field:
-              # "598" -> smartmontools-8.0-598.el8.<arch>.rpm. A plain release
-              # version (no "-NNN" part) keeps the spec file default.
-              rel=
-              case "${SMARTMONTOOLS_GIT_VER_NO_HASH}" in
-                *-*) rel=${SMARTMONTOOLS_GIT_VER_NO_HASH##*-} ;;
-              esac
-              case "$rel" in
-                *[!0-9]*) rel= ;;
-              esac
-
+              # "dist .el8" pins the release tag. Version and Release of the
+              # spec file are macro based ("%{?pkgver}..." / "%{?rpmrel}..."),
+              # so they are taken from the version information of this run and
+              # can never drift apart from configure.ac or from the release tag
+              # created by build.yml.
+              # A plain release version (no "-NNN" commit counter) keeps the
+              # default Release from the spec file.
               rpmbuild -bb \
                 --define "_topdir /root/rpmbuild" \
                 --define "dist .el8" \
-                --define "version ${SMARTMONTOOLS_PKG_VER}" \
-                ${rel:+--define "release ${rel}"} \
+                --define "pkgver ${PKG_VER}" \
+                ${RPM_RELEASE:+--define "rpmrel ${RPM_RELEASE}"} \
                 /src/smartmontools.spec
+
+              # Show the result before copying it out
+              ls -l /root/rpmbuild/RPMS/*/
 
               # Copy the RPM(s) back to the workspace
               cp -v /root/rpmbuild/RPMS/*/*.rpm /src/
@@ -210,6 +250,17 @@ jobs:
               /usr/sbin/smartctl --scan || true
             '
 
+      - name: Show resulting RPM version
+        run: |
+          ls -l *.rpm
+          # Fail if the RPM version does not match the version of this run
+          for f in *.rpm; do
+            case "$f" in
+              smartmontools-${GIT_VER_NO_HASH}.el8.*.rpm|smartmontools-${PKG_VER}-*.el8.*.rpm) ;;
+              *) echo "::warning file=$f::unexpected RPM file name" ;;
+            esac
+          done
+
       - name: Upload RPM artifact
         uses: actions/upload-artifact@v7
         with:
@@ -219,7 +270,11 @@ jobs:
           retention-days: 14
 
       - name: Attach RPM to GitHub release
-        if: github.event_name == 'release'
+        # Only for manual runs with an explicit tag. When called by build.yml
+        # the RPMs are published by the 'publish-artifacts' job, which merges
+        # every artifact of the run into the single release it creates.
+        if: ${{ inputs.attach_tag }}
         uses: softprops/action-gh-release@v3
         with:
+          tag_name: ${{ inputs.attach_tag }}
           files: "*.rpm"
