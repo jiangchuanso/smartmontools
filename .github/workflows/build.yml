@@ -312,10 +312,11 @@ jobs:
     # published together with everything else by 'publish-artifacts' below.
     name: Build el8 RPMs
     needs: make-src-tgz
-    # The aarch64 build runs under QEMU and is slow, so skip it for pull
-    # requests and do not let a failure block the release.
+    # 'continue-on-error' is NOT supported on a job that calls a reusable
+    # workflow via 'uses:' (it triggers a schema error). A failed RPM build
+    # therefore intentionally blocks the release, so a release is never
+    # published without its RPMs.
     if: github.event_name != 'pull_request'
-    continue-on-error: true
     uses: ./.github/workflows/build-centos8-rpm.yml
     with:
       pkg_ver: ${{ needs.make-src-tgz.outputs.SMARTMONTOOLS_PKG_VER }}
