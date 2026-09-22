@@ -571,6 +571,9 @@ jobs:
     runs-on: ubuntu-latest
     # Cross build on Fedora is faster than the native build done by 'cygwin.yml'.
     # The recipes below are partly borrowed from Cygwin's own CI build.
+    # NOTE: the cross toolchain comes from COPR ('download.copr.fedorainfracloud.org'),
+    # which is an unreliable single backend. The retry loop below tolerates that;
+    # see the comment there before "simplifying" it.
     container: fedora:latest
 
     steps:
@@ -578,8 +581,51 @@ jobs:
         run: |
           dnf install -y make
           dnf install -y dnf-plugins-core
-          dnf copr enable -y yselkowitz/cygwin
-          dnf install -y cygwin64-gcc-c++
+          # 'download.copr.fedorainfracloud.org' is a single backend and from time to
+          # time answers with 'Curl error 28' (transfer below the 1000 B/s default
+          # 'minrate' for 30 s) or HTTP 504. 'dnf copr enable' writes
+          # 'skip_if_unavailable=True' into the generated repo file, so such a failure
+          # does NOT abort the command: the repo is skipped silently and the run then
+          # dies further down with the misleading 'No match for argument:
+          # cygwin64-gcc-c++' (that is what happened on 2026-09-22).
+          #
+          # So: disable the low speed abort ('minrate=0'), raise the timeout, drop the
+          # possibly half fetched metadata and retry. dnf5 no longer has the 'retries'
+          # option of dnf4, hence the loop. '@cygwin/cygwin' is Cygwin's own CI project
+          # (actively rebuilt for every Fedora release) and serves as a fallback for
+          # the historical personal project 'yselkowitz/cygwin'.
+          #
+          # The loop is driven by a time budget instead of a fixed attempt count: on
+          # 2026-09-22 BOTH projects answered with HTTP 504 for longer than the 12 min
+          # that '3 attempts per project' could cover. 'dnf' keeps the RPMs of a failed
+          # transaction in its cache, so each attempt needs fewer successful transfers
+          # than the previous one: keep alternating between the two projects until the
+          # toolchain is installed or the budget is used up.
+          budget=1500
+          start=$(date +%s)
+          attempt=0
+          backoff=10
+          while [ "$(( $(date +%s) - start ))" -lt "${budget}" ]; do
+            for repo in yselkowitz/cygwin @cygwin/cygwin; do
+              attempt=$((attempt + 1))
+              echo "=== Installing cygwin64-gcc-c++ from '${repo}'" \
+                "(attempt ${attempt}, $(( $(date +%s) - start ))s of ${budget}s used)"
+              dnf clean metadata >/dev/null 2>&1 || true
+              if dnf --setopt=minrate=0 --setopt=timeout=120 copr enable -y "${repo}" &&
+                 dnf --setopt=minrate=0 --setopt=timeout=120 install -y cygwin64-gcc-c++; then
+                echo "=== cygwin64-gcc-c++ installed from '${repo}'"
+                exit 0
+              fi
+              dnf copr disable -y "${repo}" || true
+              echo "=== Attempt ${attempt} from '${repo}' failed, sleeping ${backoff}s"
+              sleep "${backoff}"
+              backoff=$((backoff * 2))
+              if [ "${backoff}" -gt 30 ]; then backoff=30; fi
+            done
+          done
+          dnf repolist || true
+          echo "::error::The Cygwin cross toolchain could not be installed from any COPR repository"
+          exit 1
 
       - uses: actions/download-artifact@v8
         with:
