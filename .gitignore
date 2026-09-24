@@ -95,6 +95,7 @@
 # Untracked files and directories starting with a dot (top-level only),
 # e.g. '.codebuddy/' (project data / working memory) or IDE settings like
 # '.vscode/' / '.idea/'.  '.github/' and the tracked dot files
-# (.editorconfig, .gitattributes, .gitignore) are not affected.
+# (.editorconfig, .gitattributes, .gitignore, .mailmap) are not affected.
 /.*
 !/.github/
+!/.mailmap
