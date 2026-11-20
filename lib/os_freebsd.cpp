@@ -65,6 +65,7 @@
 #define MAX_MSG 3
 
 namespace smartmon {
+SMARTMON_BEGIN_VERSION_NAMESPACE
 
 // Utility function for printing warnings
 void printwarning(int msgNo, const char* extra) {
@@ -106,7 +107,7 @@ void printwarning(int msgNo, const char* extra) {
 
 /////////////////////////////////////////////////////////////////////////////
 
-namespace os_freebsd { // No need to publish anything, name provided for Doxygen
+namespace {
 
 /////////////////////////////////////////////////////////////////////////////
 /// Implement shared open/close routines with old functions.
@@ -142,7 +143,7 @@ private:
 freebsd_smart_device::~freebsd_smart_device()
 {
   if (m_fd >= 0)
-    os_freebsd::freebsd_smart_device::close();
+    freebsd_smart_device::close();
 }
 
 // migration from the old_style 
@@ -2397,15 +2398,16 @@ std::string freebsd_smart_interface::get_valid_custom_dev_types_str()
   return "3ware,N, hpt,L/M/N, cciss,N, areca,N/E, megaraid,N, atacam";
 }
 
-} // namespace os_freebsd
+} // namespace
 
 /////////////////////////////////////////////////////////////////////////////
 /// Initialize platform interface and register with smi()
 
 void smart_interface::init()
 {
-  static os_freebsd::freebsd_smart_interface the_interface;
+  static freebsd_smart_interface the_interface;
   smart_interface::set(&the_interface);
 }
 
+SMARTMON_END_VERSION_NAMESPACE
 } // namespace smartmon

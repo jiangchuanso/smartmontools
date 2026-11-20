@@ -103,8 +103,9 @@
 #define ARGUSED(x) ((void)(x))
 
 namespace smartmon {
+SMARTMON_BEGIN_VERSION_NAMESPACE
 
-namespace os_linux { // No need to publish anything, name provided for Doxygen
+namespace {
 
 /////////////////////////////////////////////////////////////////////////////
 /// Shared open/close routines
@@ -5244,20 +5245,22 @@ ps3stor_errno linux_ps3stor_channel::get_devfd(unsigned host, int &devfd)
   return err;
 }
 
-} // namespace os_linux
+} // namespace
 
 /////////////////////////////////////////////////////////////////////////////
 /// Initialize platform interface and register with smi()
 
 void smart_interface::init()
 {
-  static os_linux::linux_smart_interface the_interface;
+  static linux_smart_interface the_interface;
   smart_interface::set(&the_interface);
 }
 
+SMARTMON_END_VERSION_NAMESPACE
+
 void ps3stor_channel::init()
 {
-  static os_linux::linux_ps3stor_channel the_ps3stor_instance;
+  static linux_ps3stor_channel the_ps3stor_instance;
   ps3stor_channel::set(&the_ps3stor_instance);
 }
 

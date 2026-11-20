@@ -11,14 +11,14 @@
 #ifndef SMARTMON_NVMECMDS_H
 #define SMARTMON_NVMECMDS_H
 
+#include <smartmon/dev_interface.h>
 #include <smartmon/nvme.h>
 
 #include <errno.h>
 #include <stddef.h>
 
 namespace smartmon {
-
-class nvme_device;
+SMARTMON_BEGIN_VERSION_NAMESPACE
 
 // Broadcast namespace ID.
 constexpr uint32_t nvme_broadcast_nsid = 0xffffffffU;
@@ -76,6 +76,7 @@ void nvme_if_be_byteswap_inplace(nvme_error_log_page * error_log, unsigned num_e
 void nvme_if_be_byteswap_inplace(nvme_smart_log & smart_log);
 void nvme_if_be_byteswap_inplace(nvme_self_test_log & self_test_log);
 
+SMARTMON_END_VERSION_NAMESPACE
 } // namespace smartmon
 
 #endif // SMARTMON_NVMECMDS_H

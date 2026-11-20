@@ -71,6 +71,7 @@
 #include "os_generic.h"
 
 namespace smartmon {
+SMARTMON_BEGIN_VERSION_NAMESPACE
 
 // This is here to prevent compiler warnings for unused arguments of
 // functions.
@@ -95,7 +96,7 @@ static void print_smartctl_examples(){
 
 /////////////////////////////////////////////////////////////////////////////
 
-namespace os_generic { // No need to publish anything, name provided for Doxygen
+namespace {
 
 class generic_smart_interface
 : public /*implements*/ smart_interface
@@ -192,7 +193,7 @@ std::string generic_smart_interface::get_valid_custom_dev_types_str()
   return "";
 }
 
-} // namespace os_generic
+} // namespace
 
 
 /////////////////////////////////////////////////////////////////////////////
@@ -200,8 +201,9 @@ std::string generic_smart_interface::get_valid_custom_dev_types_str()
 
 void smart_interface::init()
 {
-  static os_generic::generic_smart_interface the_interface;
+  static generic_smart_interface the_interface;
   smart_interface::set(&the_interface);
 }
 
+SMARTMON_END_VERSION_NAMESPACE
 } // namespace smartmon

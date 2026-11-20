@@ -57,6 +57,7 @@
 #include <smartmon/sg_unaligned.h>
 
 namespace smartmon {
+SMARTMON_BEGIN_VERSION_NAMESPACE
 
 /* This is a slightly stretched SCSI sense "descriptor" format header.
    The addition is to allow the 0x70 and 0x71 response codes. The idea
@@ -93,7 +94,7 @@ static int sg_scsi_normalize_sense(const unsigned char * sensep, int sb_len,
 #define ATA_RETURN_DESCRIPTOR 9
 
 
-namespace sat { // no need to publish anything, name provided for Doxygen
+namespace {
 
 /// SAT support.
 /// Implements ATA by tunnelling through SCSI.
@@ -565,7 +566,7 @@ smart_device * sat_device::autodetect_open()
   return this;
 }
 
-} // namespace sat
+} // namespace
 
 /////////////////////////////////////////////////////////////////////////////
 
@@ -627,7 +628,7 @@ static int sg_scsi_normalize_sense(const unsigned char * sensep, int sb_len,
 
 /////////////////////////////////////////////////////////////////////////////
 
-namespace sat {
+namespace {
 
 /// Cypress USB Bridge support.
 
@@ -1410,9 +1411,7 @@ bool usbsunplus_device::ata_pass_through(const ata_cmd_in & in, ata_cmd_out & ou
 }
 
 
-} // namespace sat
-
-using namespace sat;
+} // namespace
 
 
 /////////////////////////////////////////////////////////////////////////////
@@ -1573,4 +1572,5 @@ const char * smart_interface::get_usb_dev_type_by_id(int vendor_id, int product_
   return type.c_str();
 }
 
+SMARTMON_END_VERSION_NAMESPACE
 } // namespace smartmon
