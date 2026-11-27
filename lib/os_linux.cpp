@@ -2897,7 +2897,7 @@ smart_device * linux_ps3stor_device::autodetect_open()
   // Use INQUIRY to detect type
   {
     // SAT?
-    ata_device * newdev = smi()->autodetect_sat_device(this, req_buff, len);
+    ata_device * newdev = get_smart_interface().autodetect_sat_device(this, req_buff, len);
     if (newdev) // NOTE: 'this' is now owned by '*newdev'
       return newdev;
   }
@@ -5056,12 +5056,12 @@ ps3stor_tlv *linux_ps3stor_channel::add_tlv_data(ps3stor_tlv *tlv, unsigned type
 
 bool linux_ps3stor_channel::set_err(int no, const char * msg)
 {
-  return smi()->set_err(no, "%s", msg);
+  return smart_interface::get().set_err(no, "%s", msg);
 }
 
 bool linux_ps3stor_channel::set_err(int no)
 {
-  return smi()->set_err(no);
+  return smart_interface::get().set_err(no);
 }
 
 int linux_ps3stor_channel::open_node(enum ps3stor_device_type dev_type)
