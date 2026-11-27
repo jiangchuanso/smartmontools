@@ -26,14 +26,15 @@ static int usage(const char * prog, int status)
     "    -r LEVEL   Specify debug level\n"
     "    -h         Print this help\n"
     "    -V         Print version information\n",
-    smartmon::format_version_info("ata-standby").c_str(), prog);
+    smartmon::format_version_info("ata-standby",
+      smartmon::smart_interface::get().get_os_version_str()).c_str(), prog);
     return status;
 }
 
 int main(int argc, char **argv)
 {
   try {
-    smartmon::smart_interface::init();
+    smartmon::smart_interface & smi = smartmon::smart_interface::init();
 
     const char * type = nullptr;
     int ai;
@@ -42,7 +43,7 @@ int main(int argc, char **argv)
         type = argv[++ai];
         if (!std::strcmp(type, "help")) {
            std::printf("Valid arguments to '-d':\n"
-             "%s\n", smartmon::smi()->get_valid_dev_types_str().c_str());
+             "%s\n", smi.get_valid_dev_types_str().c_str());
            return 0;
         }
       }
@@ -53,7 +54,8 @@ int main(int argc, char **argv)
         return usage(argv[0], 0);
       }
       else if (!std::strcmp(argv[ai], "-V")) {
-        std::fputs(smartmon::format_version_info("ata-standby", 3).c_str(), stdout);
+        std::fputs(smartmon::format_version_info("ata-standby",
+          smi.get_os_version_str(), 3).c_str(), stdout);
         return 0;
       }
       else {
@@ -64,10 +66,9 @@ int main(int argc, char **argv)
       return usage(argv[0], 1);
 
     const char * name = argv[ai];
-    std::unique_ptr<smartmon::smart_device> dev( smartmon::smi()->get_smart_device(name, type) );
+    std::unique_ptr<smartmon::smart_device> dev{ smi.get_smart_device(name, type) };
     if (!dev) {
-      std::fprintf(stderr, "%s: get_smart_device() failed: %s\n", name,
-        smartmon::smi()->get_errmsg());
+      std::fprintf(stderr, "%s: get_smart_device() failed: %s\n", name, smi.get_errmsg());
       return 1;
     }
 

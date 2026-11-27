@@ -29,7 +29,8 @@ static int usage(const char * prog, int status)
     "    -r LEVEL   Specify debug level\n"
     "    -h         Print this help\n"
     "    -V         Print version information\n",
-    smartmon::format_version_info("lsdisk").c_str(), prog, prog);
+    smartmon::format_version_info("lsdisk",
+      smartmon::smart_interface::get().get_os_version_str()).c_str(), prog, prog);
     return status;
 }
 
@@ -134,7 +135,7 @@ static int identify(std::unique_ptr<smartmon::smart_device> & dev)
 int main(int argc, char **argv)
 {
   try {
-    smartmon::smart_interface::init();
+    smartmon::smart_interface & smi = smartmon::smart_interface::init();
 
     smartmon::smart_devtype_list types{};
     int ai;
@@ -143,7 +144,7 @@ int main(int argc, char **argv)
         const char * type = argv[++ai];
         if (!std::strcmp(type, "help")) {
            std::printf("Valid arguments to '-d':\n"
-             "%s\n", smartmon::smi()->get_valid_dev_types_str().c_str());
+             "%s\n", smi.get_valid_dev_types_str().c_str());
            return 0;
         }
         types.push_back(type);
@@ -156,7 +157,8 @@ int main(int argc, char **argv)
         return usage(argv[0], 0);
       }
       else if (!std::strcmp(argv[ai], "-V")) {
-        std::fputs(smartmon::format_version_info("lsdisk", 3).c_str(), stdout);
+        std::fputs(smartmon::format_version_info("lsdisk",
+          smi.get_os_version_str(), 3).c_str(), stdout);
         return 0;
       }
       else {
@@ -171,9 +173,9 @@ int main(int argc, char **argv)
       const char * type = (!types.empty() ? types.front().c_str() : nullptr);
       do {
         const char * name = argv[ai];
-        std::unique_ptr<smartmon::smart_device> dev( smartmon::smi()->get_smart_device(name, type) );
+        std::unique_ptr<smartmon::smart_device> dev{ smi.get_smart_device(name, type) };
         if (!dev) {
-          std::fprintf(stderr, "%s: get_smart_device() failed: %s\n", name, smartmon::smi()->get_errmsg());
+          std::fprintf(stderr, "%s: get_smart_device() failed: %s\n", name, smi.get_errmsg());
           status |= 1;
           continue;
         }
@@ -183,8 +185,8 @@ int main(int argc, char **argv)
     }
     else {
       smartmon::smart_device_list devs{};
-      if (!smartmon::smi()->scan_smart_devices(devs, types)) {
-        std::fprintf(stderr, "scan_smart_devices() failed: %s\n", smartmon::smi()->get_errmsg());
+      if (!smi.scan_smart_devices(devs, types)) {
+        std::fprintf(stderr, "scan_smart_devices() failed: %s\n", smi.get_errmsg());
         return 1;
       }
 
